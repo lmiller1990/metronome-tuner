@@ -205,8 +205,25 @@ public final class AudioEngine {
         didBuild = true
 
         let input = engine.inputNode
-        let inputFormat = input.outputFormat(forBus: 0)
-        sampleRate = inputFormat.sampleRate
+        var inputFormat = input.outputFormat(forBus: 0)
+        // The input node can report a placeholder format with a zero (invalid)
+        // sample rate before the session is fully established. Fall back to the
+        // session's hardware rate, then a sane hardware default, so we never
+        // build the graph with a 0 Hz rate (which makes `AVAudioFormat(...)`
+        // return nil and force-unwrap below crash).
+        var rate = inputFormat.sampleRate
+        if rate <= 0 {
+            rate = AVAudioSession.sharedInstance().sampleRate
+        }
+        if rate <= 0 {
+            rate = 44_100
+        }
+        if rate <= 0 || !rate.isFinite {
+            rate = 44_100
+        }
+        sampleRate = rate
+        inputFormat = AVAudioFormat(standardFormatWithSampleRate: rate, channels: 1)
+            ?? inputFormat
 
         let clickBox = ClickRejectionBox(windowSeconds: 0.025)
 
@@ -215,8 +232,12 @@ public final class AudioEngine {
                                         beatsPerMeasure: metronome.beatsPerMeasure,
                                         accentFirstBeat: metronome.accentFirstBeat)
         metronomeEngine = metronome
-        let outputFormat = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 2)
-        metronome.attach(to: engine, format: outputFormat!)
+        guard let outputFormat = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 2) else {
+            // Cannot happen now (rate is a positive finite value), but degrade
+            // gracefully instead of trapping if it ever did.
+            return
+        }
+        metronome.attach(to: engine, format: outputFormat)
 
         let publish: @Sendable (PitchMeasurement) -> Void = { [weak self] measurement in
             Task { @MainActor in
@@ -226,7 +247,10 @@ public final class AudioEngine {
         let processor = MicProcessor(sampleRate: sampleRate, clickBox: clickBox, publish: publish)
         micProcessor = processor
 
-        input.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { buffer, time in
+        input.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { @Sendable buffer, time in
+            // This closure runs on AVFoundation's realtime messenger queue, NOT
+            // the main actor. It must be non-isolated: capture only the
+            // @unchecked Sendable `processor`, never `@MainActor` state here.
             processor.process(buffer: buffer, time: time)
         }
 
@@ -238,7 +262,10 @@ public final class AudioEngine {
     private func startPhaseTicker() {
         guard phaseTimer == nil else { return }
         let timer = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated {
+            // The Timer fires on the main run loop, but hop explicitly rather
+            // than `assumeIsolated`: if the block itself is ever scheduled off
+            // the main thread, `assumeIsolated` traps and crashes the app.
+            Task { @MainActor in
                 self?.updatePendulumPhase()
             }
         }

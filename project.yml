@@ -10,7 +10,13 @@ targets:
     platform: iOS
     deploymentTarget: "17.0"
     sources:
-      - path: App
+      - path: App/ViolinPracticeApp.swift
+      - path: App/Audio
+        group: Audio
+      - path: App/Views
+        group: Views
+      - path: App/Assets.xcassets
+      - path: App/Info.plist
     dependencies:
       - package: ViolinPracticeCore
     settings:

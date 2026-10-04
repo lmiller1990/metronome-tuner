@@ -29,7 +29,7 @@ Sources/ViolinPracticeCore/   pure, testable logic (YIN, smoothing, click reject
                               metronome scheduling, music theory, models)
 Tests/ViolinPracticeCoreTests/  unit tests (59, run via `swift test`)
 App/                          the iOS app target
-  App/ViolinPracticeApp.swift app entry (@main, mic permission, engine.start())
+  ViolinPracticeApp.swift     app entry (@main, mic permission, engine.start())
   Audio/AudioEngine.swift     @Observable @MainActor engine (session, mic tap, DSP queue)
   Audio/MetronomeEngine.swift AVAudioSourceNode sample-accurate click rendering
   Views/*.swift               SwiftUI (PracticeView, TunerGauge, NoteDisplay,
@@ -68,10 +68,32 @@ open ViolinPractice.xcodeproj
 
 ### Code signing
 
-The generated project builds with code signing disabled (`CODE_SIGNING_ALLOWED =
-NO` in `project.yml`) so the compile-only step above needs no team. To **deploy to
-a device**, remove those two lines (or select your team in *Signing &
-Capabilities* in Xcode) and set a development team.
+For the compile-only step you can disable signing:
+
+```bash
+xcodebuild -project ViolinPractice.xcodeproj -scheme ViolinPractice \
+  -destination 'generic/platform=iOS' build CODE_SIGNING_ALLOWED=NO
+```
+
+To **deploy to a physical iPhone** (the only way to test audio):
+
+1. In Xcode, select the **ViolinPractice** target → **Signing & Capabilities**.
+2. Enable **"Automatically manage signing"** and pick your **Team** (your Apple ID
+   / paid or free developer team).
+3. Optionally change the bundle id — `com.example.ViolinPractice` is fine locally.
+4. Ensure your device is **trusted**: Xcode → *Window → Devices and Simulators*
+   shows the iPhone, and after enabling Developer Mode on the phone you must tap
+   **Trust**.
+5. Select your iPhone as the run destination and press **Run**.
+
+If the phone shows nothing after a "successful" run, it is almost always the
+signing/team step above (an unsigned binary can compile but cannot install) or the
+device trust prompt. If you change the bundle id, you may need to re-select the
+run destination.
+
+The default `project.yml` uses `CODE_SIGN_STYLE: Automatic` with an empty
+`DEVELOPMENT_TEAM`, so you **must** pick a team in Xcode (the team is per-developer
+and is not committed).
 
 ---
 
@@ -126,3 +148,27 @@ The following pass in this environment (macOS, no iOS simulator runtime installe
 
 Simulator **run** and the real-hardware checklist above are the final user steps and
 cannot be exercised here.
+
+---
+
+## Debugging device crashes
+
+To see why a device run crashed, pull the `.ips` crash logs off the phone and read
+the faulting thread's backtrace:
+
+```bash
+brew install libimobiledevice   # one time
+idevicecrashreport -k ./crashlogs
+# then open crashlogs/.../ViolinPractice-*.ips
+```
+
+The key fields are `faultingThread`, `legacyInfo.threadTriggered.queue`, and the
+`frames[].symbol` list. Symbolicated frames name the exact Swift closure or
+framework that trapped.
+
+Known trap (fixed): the mic-tap `installTap` closure inherits `@MainActor`
+isolation from `AudioEngine.buildGraph()` but runs on AVFoundation's
+`RealtimeMessenger` queue, trapping with `_dispatch_assert_queue_fail`. The tap
+closure is marked `@Sendable` and captures only the `@unchecked Sendable`
+`MicProcessor`, never `@MainActor` state. If you add audio callbacks, keep them
+`nonisolated`/`@Sendable` and touch no main-actor state from realtime threads.

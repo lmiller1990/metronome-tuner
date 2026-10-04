@@ -66,17 +66,17 @@ metronome/
 │   ├── PitchSmootherTests.swift
 │   ├── ClickRejectionTests.swift
 │   └── MetronomeSchedulerTests.swift
-└── App/
-    ├── App/ViolinPracticeApp.swift
-    ├── Audio/AudioEngine.swift
-    ├── Audio/MetronomeEngine.swift
-    ├── Views/PracticeView.swift
-    ├── Views/TunerGauge.swift
-    ├── Views/NoteDisplay.swift
-    ├── Views/MetronomeControls.swift
-    ├── Views/PendulumView.swift
-    ├── Info.plist
-    └── Assets.xcassets/
+├── App/
+│   ├── ViolinPracticeApp.swift
+│   ├── Audio/AudioEngine.swift
+│   ├── Audio/MetronomeEngine.swift
+│   ├── Views/PracticeView.swift
+│   ├── Views/TunerGauge.swift
+│   ├── Views/NoteDisplay.swift
+│   ├── Views/MetronomeControls.swift
+│   ├── Views/PendulumView.swift
+│   ├── Info.plist
+│   └── Assets.xcassets/
 ```
 
 ### Shared public API contracts (in `ViolinPracticeCore`)
