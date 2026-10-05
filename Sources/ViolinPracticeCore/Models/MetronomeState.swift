@@ -4,6 +4,8 @@ public enum MetronomeSound: String, CaseIterable, Identifiable, Sendable {
     case woodblock
     case beep
     case digital
+    case clap
+    case rimshot
 
     public var id: String { rawValue }
 
@@ -13,6 +15,8 @@ public enum MetronomeSound: String, CaseIterable, Identifiable, Sendable {
         case .woodblock: return "Woodblock"
         case .beep: return "Beep"
         case .digital: return "Digital"
+        case .clap: return "Clap"
+        case .rimshot: return "Rimshot"
         }
     }
 }
