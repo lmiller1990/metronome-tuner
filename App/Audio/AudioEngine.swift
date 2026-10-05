@@ -69,7 +69,7 @@ final class MicProcessor: @unchecked Sendable {
     private var smoother: PitchSmoother
     private let clickBox: ClickRejectionBox
     private let publish: @Sendable (PitchMeasurement) -> Void
-    private let dspQueue = DispatchQueue(label: "com.example.violinpractice.pitch", qos: .userInitiated)
+    private let dspQueue = DispatchQueue(label: "me.lachlan-miller.ViolinPractice.pitch", qos: .userInitiated)
 
     private let poolLock = UnfairLock()
     // `var` (not `let`) so `pool[index].withUnsafeMutableBufferPointer` can
@@ -165,6 +165,8 @@ public final class AudioEngine {
     public private(set) var referenceA4Hz: Double = MusicTheory.defaultA4Hz
 
     private static let referenceA4HzKey = "referenceA4Hz"
+    private static let metronomeVolumeKey = "metronomeVolume"
+    private static let metronomeBPMKey = "metronomeBPM"
 
     private let engine = AVAudioEngine()
     private var metronomeEngine: MetronomeEngine?
@@ -173,12 +175,26 @@ public final class AudioEngine {
     private var sampleRate: Double = 48_000
     private var didBuild = false
 
+    private var lifecycleObservers: [NSObjectProtocol] = []
+    private var resumeMetronomeAfterInterruption = false
+
     public init() {
         // Restore the persisted reference pitch (falls back to 440 when unset),
         // clamped to the supported range so a bad stored value can't produce an
         // out-of-range tuning grid.
         let stored = UserDefaults.standard.object(forKey: Self.referenceA4HzKey) as? Double
         referenceA4Hz = stored.map(Self.clampReference) ?? MusicTheory.defaultA4Hz
+
+        // Restore the persisted metronome volume (falls back to full).
+        let storedVolume = UserDefaults.standard.object(forKey: Self.metronomeVolumeKey) as? Double
+        metronome.volume = Self.clampVolume(storedVolume ?? 1)
+
+        // Restore the persisted tempo (falls back to the current default),
+        // clamped to the supported range.
+        let storedBPM = UserDefaults.standard.object(forKey: Self.metronomeBPMKey) as? Double
+        metronome.bpm = Self.clampBPM(storedBPM ?? metronome.bpm)
+
+        observeAudioLifecycle()
     }
 
     // MARK: Public surface
@@ -210,9 +226,20 @@ public final class AudioEngine {
     }
 
     public func setBPM(_ bpm: Double) {
-        let clamped = clampBPM(bpm)
+        let clamped = Self.clampBPM(bpm)
         metronome.bpm = clamped
+        UserDefaults.standard.set(clamped, forKey: Self.metronomeBPMKey)
         metronomeEngine?.setBPM(clamped)
+    }
+
+    /// Sets the metronome's own output level (0...1), independent of the system
+    /// volume, and persists it. Applies live while the metronome is running.
+    public func setMetronomeVolume(_ volume: Double) {
+        let clamped = Self.clampVolume(volume)
+        guard clamped != metronome.volume else { return }
+        metronome.volume = clamped
+        UserDefaults.standard.set(clamped, forKey: Self.metronomeVolumeKey)
+        metronomeEngine?.setVolume(clamped)
     }
 
     public func setReferenceA4Hz(_ hz: Double) {
@@ -263,6 +290,7 @@ public final class AudioEngine {
                                         beatsPerMeasure: metronome.beatsPerMeasure,
                                         accentFirstBeat: metronome.accentFirstBeat)
         metronomeEngine = metronome
+        metronome.setVolume(self.metronome.volume)
         guard let outputFormat = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 2) else {
             // Cannot happen now (rate is a positive finite value), but degrade
             // gracefully instead of trapping if it ever did.
@@ -286,6 +314,121 @@ public final class AudioEngine {
         }
 
         engine.prepare()
+    }
+
+    // MARK: - Audio session lifecycle
+
+    /// Observes interruptions (calls, Siri), route changes, and engine
+    /// configuration changes so audio recovers instead of dying until relaunch.
+    /// Registered once; the engine lives for the app's lifetime.
+    private func observeAudioLifecycle() {
+        guard lifecycleObservers.isEmpty else { return }
+        let center = NotificationCenter.default
+
+        lifecycleObservers.append(center.addObserver(
+            forName: AVAudioSession.interruptionNotification, object: nil, queue: .main
+        ) { [weak self] note in
+            let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt
+            Task { @MainActor in self?.handleInterruption(typeRaw: raw) }
+        })
+
+        lifecycleObservers.append(center.addObserver(
+            forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main
+        ) { [weak self] note in
+            let raw = note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt
+            Task { @MainActor in self?.handleRouteChange(reasonRaw: raw) }
+        })
+
+        lifecycleObservers.append(center.addObserver(
+            forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.handleConfigurationChange() }
+        })
+    }
+
+    /// Interruption began: remember the metronome intent and stop cleanly.
+    /// Interruption ended: reactivate the session, restart the engine, and resume
+    /// the metronome if it had been running.
+    private func handleInterruption(typeRaw: UInt?) {
+        guard let raw = typeRaw, let type = AVAudioSession.InterruptionType(rawValue: raw) else { return }
+        switch type {
+        case .began:
+            resumeMetronomeAfterInterruption = metronome.isRunning
+            if metronome.isRunning { stopMetronome() }
+            phaseTimer?.invalidate()
+            phaseTimer = nil
+        case .ended:
+            configureSession()
+            if didBuild, !engine.isRunning { try? engine.start() }
+            startPhaseTicker()
+            if resumeMetronomeAfterInterruption {
+                resumeMetronomeAfterInterruption = false
+                startMetronome()
+            }
+        @unknown default:
+            break
+        }
+    }
+
+    /// Route changes (headphones in/out, Bluetooth) can stop the engine; restart
+    /// it if needed. `.defaultToSpeaker` keeps output on the loudspeaker when a
+    /// wired device is removed.
+    private func handleRouteChange(reasonRaw: UInt?) {
+        guard didBuild, !engine.isRunning else { return }
+        configureSession()
+        try? engine.start()
+        startPhaseTicker()
+        if metronome.isRunning { metronomeEngine?.start() }
+    }
+
+    /// The engine stops and its nodes can be invalidated when the hardware
+    /// configuration changes (e.g. a sample-rate change on route change). If the
+    /// hardware rate changed the whole graph must be rebuilt; otherwise a plain
+    /// restart suffices. Without this the app stays silent after such events.
+    private func handleConfigurationChange() {
+        guard didBuild else { return }
+        let newRate = hardwareSampleRate()
+        if newRate > 0, abs(newRate - sampleRate) >= 1 {
+            rebuildGraph()
+        } else if !engine.isRunning {
+            configureSession()
+            try? engine.start()
+            startPhaseTicker()
+            if metronome.isRunning { metronomeEngine?.start() }
+        }
+    }
+
+    /// Tears the graph down so `buildGraph()` can rebuild it against the new
+    /// hardware format. Mirrors `buildGraph()`'s attachments in reverse.
+    private func tearDownGraph() {
+        guard didBuild else { return }
+        engine.inputNode.removeTap(onBus: 0)
+        if let node = metronomeEngine?.sourceNode, node.engine === engine {
+            engine.detach(node)
+        }
+        metronomeEngine = nil
+        micProcessor = nil
+        didBuild = false
+        if engine.isRunning { engine.stop() }
+    }
+
+    private func rebuildGraph() {
+        let wasRunning = metronome.isRunning
+        tearDownGraph()
+        configureSession()
+        buildGraph()
+        try? engine.start()
+        startPhaseTicker()
+        if wasRunning { startMetronome() }
+    }
+
+    /// Current hardware sample rate, 0 when unknown. Read from the session first
+    /// (avoids touching `inputNode` while it reports a placeholder format).
+    private func hardwareSampleRate() -> Double {
+        let sessionRate = AVAudioSession.sharedInstance().sampleRate
+        if sessionRate > 0 { return sessionRate }
+        let inputRate = engine.inputNode.outputFormat(forBus: 0).sampleRate
+        return inputRate > 0 ? inputRate : 0
     }
 
     // MARK: Pendulum phase
@@ -321,11 +464,15 @@ public final class AudioEngine {
         if phase != pendulumPhase { pendulumPhase = phase }
     }
 
-    private func clampBPM(_ bpm: Double) -> Double {
+    private static func clampBPM(_ bpm: Double) -> Double {
         min(max(bpm, MetronomeState.bpmRange.lowerBound), MetronomeState.bpmRange.upperBound)
     }
 
     private static func clampReference(_ hz: Double) -> Double {
         min(max(hz, MusicTheory.referenceA4HzRange.lowerBound), MusicTheory.referenceA4HzRange.upperBound)
+    }
+
+    private static func clampVolume(_ volume: Double) -> Double {
+        min(max(volume, MetronomeState.volumeRange.lowerBound), MetronomeState.volumeRange.upperBound)
     }
 }

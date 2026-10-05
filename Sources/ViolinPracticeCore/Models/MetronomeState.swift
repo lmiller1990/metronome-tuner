@@ -16,8 +16,15 @@ public struct MetronomeState: Equatable, Sendable {
     /// Whether beat 1 of each measure is accented. Defaults to true.
     public var accentFirstBeat: Bool = true
 
+    /// Output level of the metronome clicks, independent of the system volume.
+    /// 0 = silent, 1 = full. Defaults to 1.
+    public var volume: Double = 1
+
     public init() {}
 
     /// Supported tempo range for the POC.
     public static let bpmRange: ClosedRange<Double> = 30...240
+
+    /// Supported metronome volume range.
+    public static let volumeRange: ClosedRange<Double> = 0...1
 }

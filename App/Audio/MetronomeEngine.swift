@@ -23,6 +23,9 @@ final class MetronomeEngine: @unchecked Sendable {
         var accentFirstBeat = true
         /// Host time (seconds) of the most recent click, for pendulum phase.
         var lastBeatHostSeconds: Double = 0
+        /// Independent output gain for the clicks (0...1), applied in the render
+        /// block. Kept here so it is read under the same lock as the schedule.
+        var volume: Double = 1
     }
 
     private struct RenderBeat {
@@ -95,6 +98,14 @@ final class MetronomeEngine: @unchecked Sendable {
         }
     }
 
+    /// Sets the click output gain (clamped to 0...1). Safe to call while running.
+    func setVolume(_ volume: Double) {
+        let clamped = min(max(volume, 0), 1)
+        lock.withLock {
+            schedule.volume = clamped
+        }
+    }
+
     /// Snapshot for the main actor: last click's beat number + host time, the
     /// current beat spacing, and the running flag.
     func snapshot() -> (currentBeat: Int, beatHostSeconds: Double, samplesPerBeat: Double, running: Bool) {
@@ -116,11 +127,13 @@ final class MetronomeEngine: @unchecked Sendable {
 
         var beatCount = 0
         var running = false
+        var volume: Double = 1
 
         // 1. Advance the schedule under the lock; record this buffer's beats into
         //    the pre-allocated `pendingBeats`. No mixing or allocation here.
         lock.withLock {
             running = schedule.running
+            volume = schedule.volume
             if running, !schedule.initialized {
                 // First render after start(): place the first click a short lead
                 // ahead so it fires promptly rather than a full beat later.
@@ -148,15 +161,18 @@ final class MetronomeEngine: @unchecked Sendable {
         //    click's host time with the shared ClickRejection.
         fillSilence(audioBufferList, frameCount: frames)
         if running, beatCount > 0 {
+            let gain = Float(volume)
             for i in 0..<beatCount {
                 let beat = pendingBeats[i]
                 clickBox.register(atSeconds: beat.hostSeconds)
+                guard gain > 0 else { continue }
                 mix(click: beat.accent ? clickAccent : clickNormal,
+                    gain: gain,
                     at: beat.offset,
                     into: audioBufferList,
                     frameCount: frames)
             }
-            isSilence.pointee = false
+            isSilence.pointee = ObjCBool(volume <= 0)
         } else {
             isSilence.pointee = true
         }
@@ -174,6 +190,7 @@ final class MetronomeEngine: @unchecked Sendable {
     }
 
     private func mix(click: [Float],
+                     gain: Float,
                      at offset: Double,
                      into audioBufferList: UnsafeMutablePointer<AudioBufferList>,
                      frameCount: Int) {
@@ -186,7 +203,7 @@ final class MetronomeEngine: @unchecked Sendable {
             guard n > 0 else { continue }
             let floats = data.assumingMemoryBound(to: Float.self)
             for i in 0..<n {
-                floats[start + i] += click[i]
+                floats[start + i] += click[i] * gain
             }
         }
     }
@@ -195,12 +212,16 @@ final class MetronomeEngine: @unchecked Sendable {
 
     /// Short percussive click: a fast-decaying high sine. Accent is louder and
     /// brighter so beat 1 is distinguishable without relying on pitch.
+    ///
+    /// Levels are baked hot (near full scale) because the click is a short
+    /// transient and otherwise reads as quiet; the user-facing volume control
+    /// (`Schedule.volume`) attenuates from here rather than only attenuating.
     private static func makeClick(sampleRate: Double, accent: Bool) -> [Float] {
         let length = Int(sampleRate * 0.03) // ~30 ms
         var samples = [Float](repeating: 0, count: length)
         let baseFreq = accent ? 2200.0 : 1600.0
-        let gain = accent ? 0.9 : 0.55
-        let decay = accent ? 160.0 : 120.0
+        let gain = accent ? 1.0 : 0.85
+        let decay = accent ? 160.0 : 110.0
         for i in 0..<length {
             let t = Double(i) / sampleRate
             let envelope = exp(-decay * t)

@@ -15,6 +15,9 @@ Key design goals (see `PLAN.md` and `AGENTS.md` for the full spec):
   sustained note.
 - **Polished single dark screen** — tuner gauge in the upper half, pendulum
   metronome in the lower half.
+- **Independent metronome volume** — a slider under the pendulum sets the click
+  level separately from the system volume (`MetronomeState.volume`, persisted).
+  Clicks are synthesised near full scale so the control has real range.
 - **Configurable A4 reference** — tap ⚙ to set the concert pitch (415–466 Hz;
   presets 415/432/440/442/443/444 plus a fine slider/stepper). The tuner's note
   grid, cents, and the "A4 = …" label all follow the chosen reference, which is
@@ -33,9 +36,11 @@ Sources/ViolinPracticeCore/   pure, testable logic (YIN, smoothing, click reject
                               metronome scheduling, music theory, models)
 Tests/ViolinPracticeCoreTests/  unit tests (63, run via `swift test`)
 App/                          the iOS app target
-  ViolinPracticeApp.swift     app entry (@main, mic permission, engine.start())
+  ViolinPracticeApp.swift     app entry (@main, mic permission + denied screen)
   Audio/AudioEngine.swift     @Observable @MainActor engine (session, mic tap, DSP queue)
   Audio/MetronomeEngine.swift AVAudioSourceNode sample-accurate click rendering
+  PrivacyInfo.xcprivacy       App Store privacy manifest (UserDefaults reason CA92.1)
+  Assets.xcassets/            App icon (AppIcon-1024.png, placeholder artwork)
   Views/*.swift               SwiftUI (PracticeView, TunerGauge, NoteDisplay,
                               MetronomeControls, PendulumView, TuningSettingsView)
 project.yml                   XcodeGen spec
@@ -84,7 +89,7 @@ To **deploy to a physical iPhone** (the only way to test audio):
 1. In Xcode, select the **ViolinPractice** target → **Signing & Capabilities**.
 2. Enable **"Automatically manage signing"** and pick your **Team** (your Apple ID
    / paid or free developer team).
-3. Optionally change the bundle id — `com.example.ViolinPractice` is fine locally.
+3. The bundle id is `me.lachlan-miller.ViolinPractice`; change it only if you want a different namespace.
 4. Ensure your device is **trusted**: Xcode → *Window → Devices and Simulators*
    shows the iPhone, and after enabling Developer Mode on the phone you must tap
    **Trust**.
@@ -133,11 +138,46 @@ metronome + microphone pitch detection**.
    new tempo smoothly without skipping or doubling beats.
 6. **Pendulum synchronisation** — The visible pendulum should swing in time with the
    audible clicks, reaching its extreme at each beat.
-7. **Background/foreground recovery** — Background the app (or lock the device),
-   then return: audio and tuning should resume without the metronome or tuner
-   drifting or crashing (best-effort for the POC).
+7. **Interruption / route recovery** — Take a phone call (or invoke Siri) while the
+   metronome is running, then hang up: the session should re-activate, the tuner
+   resume, and the metronome restart. Plug in and unplug headphones: output should
+   return to the speaker without going silent.
 8. **Accent** — Beat 1 of each 4/4 measure should sound distinctly accented
    (louder/brighter) than beats 2–4.
+9. **Metronome volume** — With system volume at maximum, the slider under the
+   pendulum should make the clicks noticeably louder than the pre-volume POC and
+   fully silent at 0. The chosen level should survive a relaunch (persisted).
+
+---
+
+## Production readiness
+
+Handled in code for shipping:
+
+- **Microphone permission denial** — an actionable screen with **Open Settings**
+  replaces the indefinite spinner, and permission is re-checked on activation.
+- **Audio session lifecycle** — interruptions (calls/Siri), route changes, and
+  `AVAudioEngineConfigurationChange` re-activate the session, rebuild the engine
+  graph if the hardware format changed, and resume the metronome when it was
+  running.
+- **Privacy manifest** — `App/PrivacyInfo.xcprivacy` declares the `UserDefaults`
+  required-reason API (CA92.1), required for App Store submission.
+- **Settings persistence** — metronome volume, the A4 reference, and the metronome
+  BPM are stored in `UserDefaults` and restored on launch.
+- **Info.plist** — display name, forced dark appearance, microphone device
+  capability, and the non-exempt-encryption declaration.
+- **App icon** — `AppIcon-1024.png` is a generated placeholder; replace it with
+  final artwork before submitting.
+
+Not code, still to do before submitting:
+
+- Set `DEVELOPMENT_TEAM` in `project.yml` (or in Xcode) — the committed value is
+  empty because the signing team is per-developer. The bundle id is already set
+  (`me.lachlan-miller.ViolinPractice`).
+- Decide whether the metronome should keep playing in the background. Today it is
+  foreground-only (no `UIBackgroundModes`), the simplest reviewable choice for a
+  practice tool.
+- App Store metadata, screenshots, and any required privacy-policy URL.
 
 ---
 
@@ -165,7 +205,7 @@ twice during bring-up: **realtime/background audio callbacks must be `nonisolate
 mic ──installTap──▶ MicProcessor.process (realtime messenger queue)
                       │  copy PCM into a pre-allocated pool buffer (no alloc/lock)
                       ▼
-                 serial DSP queue (com.example.violinpractice.pitch)
+                 serial DSP queue (me.lachlan-miller.ViolinPractice.pitch)
                       │  ClickRejection.skip? → RMS → YIN (PitchDetector)
                       │  → PitchSmoother → PitchMeasurement
                       ▼
