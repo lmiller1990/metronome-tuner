@@ -20,6 +20,10 @@ public struct PitchSmoother {
     /// Number of frames to keep showing the last measurement after signal loss before idling.
     public let holdFramesWhenSilent: Int
 
+    /// Reference pitch for A4, in hertz. Determines the 12-TET grid used to map
+    /// measured frequencies to note names and cents offsets.
+    public var referenceA4Hz: Double
+
     /// Exponential smoothing factor for the cents offset (0...1; 1 = no smoothing).
     private let centsAlpha: Double = 0.35
 
@@ -38,13 +42,15 @@ public struct PitchSmoother {
                 silenceRMSThreshold: Double = 0.005,
                 maxCentsJumpPerFrame: Double = 200,
                 noteChangeConfirmationFrames: Int = 2,
-                holdFramesWhenSilent: Int = 5) {
+                holdFramesWhenSilent: Int = 5,
+                referenceA4Hz: Double = MusicTheory.defaultA4Hz) {
         self.sampleRate = sampleRate
         self.minConfidence = minConfidence
         self.silenceRMSThreshold = silenceRMSThreshold
         self.maxCentsJumpPerFrame = maxCentsJumpPerFrame
         self.noteChangeConfirmationFrames = max(1, noteChangeConfirmationFrames)
         self.holdFramesWhenSilent = max(0, holdFramesWhenSilent)
+        self.referenceA4Hz = referenceA4Hz
     }
 
     /// Feed one raw measurement (+ frame RMS). Returns the stabilized measurement for UI.
@@ -77,8 +83,8 @@ public struct PitchSmoother {
         holdCount = 0
 
         let frequencyHz = raw.frequencyHz!
-        let note = MusicTheory.nearestMidiNote(frequencyHz: frequencyHz)
-        let cents = MusicTheory.cents(frequencyHz: frequencyHz)
+        let note = MusicTheory.nearestMidiNote(frequencyHz: frequencyHz, referenceA4Hz: referenceA4Hz)
+        let cents = MusicTheory.cents(frequencyHz: frequencyHz, referenceA4Hz: referenceA4Hz)
 
         // First valid frame after idle: adopt immediately (no confirmation window).
         guard let current = displayNote else {
@@ -149,7 +155,7 @@ public struct PitchSmoother {
 
     /// Build the measurement for `note` at the given cents offset from its exact frequency.
     private func buildDisplay(note: Int, centsOffset: Double, confidence: Double) -> PitchMeasurement {
-        let noteHz = MusicTheory.frequency(midiNote: note)
+        let noteHz = MusicTheory.frequency(midiNote: note, referenceA4Hz: referenceA4Hz)
         let frequencyHz = noteHz * pow(2.0, centsOffset / 1200.0)
         return PitchMeasurement(
             frequencyHz: frequencyHz,

@@ -104,6 +104,15 @@ final class MusicTheoryTests: XCTestCase {
         XCTAssertEqual(MusicTheory.frequency(midiNote: 81, referenceA4Hz: 442), 884, accuracy: 1e-9)
     }
 
+    func testReferenceA4HzRangeCoversCommonStandards() {
+        XCTAssertEqual(MusicTheory.referenceA4HzRange.lowerBound, 415)
+        XCTAssertEqual(MusicTheory.referenceA4HzRange.upperBound, 466)
+        XCTAssertTrue(MusicTheory.referenceA4HzRange.contains(440))
+        XCTAssertTrue(MusicTheory.referenceA4HzRange.contains(442))
+        XCTAssertFalse(MusicTheory.referenceA4HzRange.contains(414))
+        XCTAssertFalse(MusicTheory.referenceA4HzRange.contains(467))
+    }
+
     // MARK: - noteName
 
     func testNoteNamesUseSharpSpelling() {

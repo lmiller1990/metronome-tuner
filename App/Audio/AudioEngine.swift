@@ -65,7 +65,7 @@ final class ClickRejectionBox: @unchecked Sendable {
 /// a dedicated serial DSP queue.
 final class MicProcessor: @unchecked Sendable {
     private let sampleRate: Double
-    private let detector: PitchDetector
+    private var detector: PitchDetector
     private var smoother: PitchSmoother
     private let clickBox: ClickRejectionBox
     private let publish: @Sendable (PitchMeasurement) -> Void
@@ -79,15 +79,28 @@ final class MicProcessor: @unchecked Sendable {
 
     init(sampleRate: Double,
          clickBox: ClickRejectionBox,
+         referenceA4Hz: Double = MusicTheory.defaultA4Hz,
          publish: @escaping @Sendable (PitchMeasurement) -> Void) {
         self.sampleRate = sampleRate
-        self.detector = PitchDetector(sampleRate: sampleRate)
-        self.smoother = PitchSmoother(sampleRate: sampleRate)
+        self.detector = PitchDetector(sampleRate: sampleRate, referenceA4Hz: referenceA4Hz)
+        self.smoother = PitchSmoother(sampleRate: sampleRate, referenceA4Hz: referenceA4Hz)
         self.clickBox = clickBox
         self.publish = publish
         let bufferSize = 4096
         self.pool = (0..<4).map { _ in [Float](repeating: 0, count: bufferSize) }
         self.freeIndices = Array(0..<4)
+    }
+
+    /// Updates the A4 reference used by the detector and smoother. Dispatched onto
+    /// the serial DSP queue so it cannot race `analyze(_:frames:hostSeconds:)`.
+    func setReferenceA4Hz(_ hz: Double) {
+        dspQueue.async { [self] in
+            detector.referenceA4Hz = hz
+            smoother.referenceA4Hz = hz
+            // The displayed note/cents were derived under the old grid; clear them so
+            // the next valid frame rebuilds under the new reference.
+            smoother.reset()
+        }
     }
 
     /// Called on the mic tap (realtime) thread.
@@ -148,6 +161,10 @@ public final class AudioEngine {
     public private(set) var metronome: MetronomeState = .init()
     /// 0...1 progress through the current beat, for the pendulum swing.
     public private(set) var pendulumPhase: Double = 0
+    /// A4 reference pitch in hertz (e.g. 440 or 442). Drives the tuner's 12-TET grid.
+    public private(set) var referenceA4Hz: Double = MusicTheory.defaultA4Hz
+
+    private static let referenceA4HzKey = "referenceA4Hz"
 
     private let engine = AVAudioEngine()
     private var metronomeEngine: MetronomeEngine?
@@ -156,7 +173,13 @@ public final class AudioEngine {
     private var sampleRate: Double = 48_000
     private var didBuild = false
 
-    public init() {}
+    public init() {
+        // Restore the persisted reference pitch (falls back to 440 when unset),
+        // clamped to the supported range so a bad stored value can't produce an
+        // out-of-range tuning grid.
+        let stored = UserDefaults.standard.object(forKey: Self.referenceA4HzKey) as? Double
+        referenceA4Hz = stored.map(Self.clampReference) ?? MusicTheory.defaultA4Hz
+    }
 
     // MARK: Public surface
 
@@ -190,6 +213,14 @@ public final class AudioEngine {
         let clamped = clampBPM(bpm)
         metronome.bpm = clamped
         metronomeEngine?.setBPM(clamped)
+    }
+
+    public func setReferenceA4Hz(_ hz: Double) {
+        let clamped = Self.clampReference(hz)
+        guard clamped != referenceA4Hz else { return }
+        referenceA4Hz = clamped
+        UserDefaults.standard.set(clamped, forKey: Self.referenceA4HzKey)
+        micProcessor?.setReferenceA4Hz(clamped)
     }
 
     // MARK: Setup
@@ -244,7 +275,7 @@ public final class AudioEngine {
                 self?.pitch = measurement
             }
         }
-        let processor = MicProcessor(sampleRate: sampleRate, clickBox: clickBox, publish: publish)
+        let processor = MicProcessor(sampleRate: sampleRate, clickBox: clickBox, referenceA4Hz: referenceA4Hz, publish: publish)
         micProcessor = processor
 
         input.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { @Sendable buffer, time in
@@ -292,5 +323,9 @@ public final class AudioEngine {
 
     private func clampBPM(_ bpm: Double) -> Double {
         min(max(bpm, MetronomeState.bpmRange.lowerBound), MetronomeState.bpmRange.upperBound)
+    }
+
+    private static func clampReference(_ hz: Double) -> Double {
+        min(max(hz, MusicTheory.referenceA4HzRange.lowerBound), MusicTheory.referenceA4HzRange.upperBound)
     }
 }

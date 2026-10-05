@@ -9,6 +9,7 @@ import ViolinPracticeCore
 @MainActor
 struct PracticeView: View {
     @State private var engine: AudioEngine
+    @State private var showSettings = false
 
     init(engine: AudioEngine) {
         _engine = State(initialValue: engine)
@@ -27,6 +28,11 @@ struct PracticeView: View {
             .background(Color.black.ignoresSafeArea())
         }
         .preferredColorScheme(.dark)
+        .sheet(isPresented: $showSettings) {
+            TuningSettingsView(referenceA4Hz: engine.referenceA4Hz) { newHz in
+                engine.setReferenceA4Hz(newHz)
+            }
+        }
     }
 
     // MARK: - Top bar
@@ -42,10 +48,15 @@ struct PracticeView: View {
                 .font(.system(size: 15, weight: .semibold, design: .rounded))
                 .foregroundStyle(.white)
             Spacer()
-            Image(systemName: "gearshape")
-                .font(.system(size: 18, weight: .medium))
-                .foregroundStyle(Color.white.opacity(0.6))
-                .accessibilityHidden(true)
+            Button {
+                showSettings = true
+            } label: {
+                Image(systemName: "gearshape")
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundStyle(Color.white.opacity(0.6))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Tuning settings")
         }
         .padding(.horizontal, 20)
         .padding(.top, 8)
@@ -53,10 +64,19 @@ struct PracticeView: View {
     }
 
     private var referenceLabel: some View {
-        Text("A4 = 440 Hz")
+        Text("A4 = \(Self.formatHz(engine.referenceA4Hz)) Hz")
             .font(.system(size: 12, weight: .medium, design: .rounded))
             .foregroundStyle(Color.white.opacity(0.35))
             .padding(.bottom, 4)
+    }
+
+    /// Formats a hertz value without trailing noise: whole numbers drop the
+    /// decimal point, others show one decimal place.
+    private static func formatHz(_ hz: Double) -> String {
+        if hz.rounded() == hz {
+            return String(Int(hz))
+        }
+        return String(format: "%.1f", hz)
     }
 
     // MARK: - Tuner

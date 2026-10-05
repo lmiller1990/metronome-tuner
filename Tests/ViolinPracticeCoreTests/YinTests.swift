@@ -98,4 +98,17 @@ final class YinTests: XCTestCase {
         XCTAssertNotNil(result.frequencyHz)
         XCTAssertEqual(result.frequencyHz!, 440.0, accuracy: 0.5)
     }
+
+    // MARK: - Custom reference pitch
+
+    func testMeasureRespectsCustomReference() {
+        // A 442 Hz tone is exactly A4 (in tune) when A4 is set to 442 Hz.
+        let buffer = makeSine(frequency: 442.0)
+        let detector = PitchDetector(sampleRate: sampleRate, referenceA4Hz: 442)
+        let measurement = detector.measure(buffer: buffer)
+        XCTAssertNotNil(measurement.frequencyHz)
+        XCTAssertEqual(measurement.midiNote, 69)
+        XCTAssertEqual(measurement.noteName, "A4")
+        XCTAssertEqual(measurement.cents, 0.0, accuracy: 1.0)
+    }
 }

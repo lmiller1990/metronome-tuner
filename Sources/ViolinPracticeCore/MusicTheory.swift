@@ -12,6 +12,10 @@ public enum MusicTheory {
     /// Default reference pitch for A4, in hertz.
     public static let defaultA4Hz = 440.0
 
+    /// Supported reference pitch range for A4, in hertz. Covers common concert
+    /// standards (baroque 415 Hz through 466 Hz) used by the settings screen.
+    public static let referenceA4HzRange: ClosedRange<Double> = 415...466
+
     /// Sharp note spellings for pitch classes 0...11 (C-based).
     private static let sharpNames = [
         "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"

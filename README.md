@@ -15,6 +15,10 @@ Key design goals (see `PLAN.md` and `AGENTS.md` for the full spec):
   sustained note.
 - **Polished single dark screen** — tuner gauge in the upper half, pendulum
   metronome in the lower half.
+- **Configurable A4 reference** — tap ⚙ to set the concert pitch (415–466 Hz;
+  presets 415/432/440/442/443/444 plus a fine slider/stepper). The tuner's note
+  grid, cents, and the "A4 = …" label all follow the chosen reference, which is
+  persisted across launches.
 
 Zero third-party runtime dependencies. Deterministic DSP/model logic lives in a
 Swift Package (`ViolinPracticeCore`) and is unit-tested on macOS; the iOS app
@@ -27,13 +31,13 @@ target imports that package.
 ```
 Sources/ViolinPracticeCore/   pure, testable logic (YIN, smoothing, click rejection,
                               metronome scheduling, music theory, models)
-Tests/ViolinPracticeCoreTests/  unit tests (59, run via `swift test`)
+Tests/ViolinPracticeCoreTests/  unit tests (63, run via `swift test`)
 App/                          the iOS app target
   ViolinPracticeApp.swift     app entry (@main, mic permission, engine.start())
   Audio/AudioEngine.swift     @Observable @MainActor engine (session, mic tap, DSP queue)
   Audio/MetronomeEngine.swift AVAudioSourceNode sample-accurate click rendering
   Views/*.swift               SwiftUI (PracticeView, TunerGauge, NoteDisplay,
-                              MetronomeControls, PendulumView)
+                              MetronomeControls, PendulumView, TuningSettingsView)
 project.yml                   XcodeGen spec
 Package.swift                 SPM manifest for the core library + tests
 ```
@@ -141,8 +145,8 @@ metronome + microphone pitch detection**.
 
 The following pass in this environment (macOS, no iOS simulator runtime installed):
 
-- `swift test` — 59 deterministic tests (music theory, YIN against synthetic sines,
-  pitch smoothing, click rejection, metronome scheduling) all green.
+- `swift test` — 63 deterministic tests (music theory, YIN against synthetic sines,
+  pitch smoothing, click rejection, metronome scheduling, A4 reference mapping) all green.
 - `xcodegen generate` — project generated cleanly.
 - `xcodebuild … build` for `generic/platform=iOS` — app compiles.
 

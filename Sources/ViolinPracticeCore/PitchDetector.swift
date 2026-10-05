@@ -19,6 +19,10 @@ public struct PitchDetector: Sendable {
     public static let minFrequencyHz: Double = 30.0
     public static let maxFrequencyHz: Double = 2000.0
 
+    /// Reference pitch for A4, in hertz. Controls how measured frequencies map to
+    /// MIDI notes and cents (e.g. 442 Hz for orchestras that tune sharp).
+    public var referenceA4Hz: Double
+
     /// Minimum lag (in samples) to consider, derived from `maxFrequencyHz`. Parabolic
     /// interpolation needs one neighbor on each side, so the smallest allowed lag is 2.
     private var tauMin: Int {
@@ -26,9 +30,12 @@ public struct PitchDetector: Sendable {
         return max(2, tau)
     }
 
-    public init(sampleRate: Double, threshold: Double = 0.15) {
+    public init(sampleRate: Double,
+                threshold: Double = 0.15,
+                referenceA4Hz: Double = MusicTheory.defaultA4Hz) {
         self.sampleRate = sampleRate
         self.threshold = threshold
+        self.referenceA4Hz = referenceA4Hz
     }
 
     /// Pure YIN. Returns `(frequencyHz, confidence)` or `(nil, 0)` when no reliable
@@ -144,12 +151,12 @@ public struct PitchDetector: Sendable {
         guard let frequencyHz = result.frequencyHz else {
             return .idle
         }
-        let midiNote = MusicTheory.nearestMidiNote(frequencyHz: frequencyHz)
+        let midiNote = MusicTheory.nearestMidiNote(frequencyHz: frequencyHz, referenceA4Hz: referenceA4Hz)
         return PitchMeasurement(
             frequencyHz: frequencyHz,
             midiNote: midiNote,
             noteName: MusicTheory.noteNameWithOctave(midiNote: midiNote),
-            cents: MusicTheory.cents(frequencyHz: frequencyHz),
+            cents: MusicTheory.cents(frequencyHz: frequencyHz, referenceA4Hz: referenceA4Hz),
             confidence: result.confidence
         )
     }

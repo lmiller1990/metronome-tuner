@@ -147,4 +147,32 @@ final class PitchSmootherTests: XCTestCase {
         let out = smoother.update(rawMeasurement(frequencyHz: 440.0), rms: 0.0001)
         XCTAssertNil(out.frequencyHz)
     }
+
+    // MARK: - Custom reference pitch
+
+    func testReference442Tunulates442HzInTune() {
+        var smoother = PitchSmoother(sampleRate: sampleRate, referenceA4Hz: 442)
+        var last: PitchMeasurement = .idle
+        for _ in 0..<20 {
+            last = smoother.update(rawMeasurement(frequencyHz: 442.0), rms: voiceRMS)
+        }
+        XCTAssertEqual(last.midiNote, 69)
+        XCTAssertEqual(last.noteName, "A4")
+        XCTAssertEqual(last.cents, 0.0, accuracy: 0.5)
+        if let frequencyHz = last.frequencyHz {
+            XCTAssertEqual(frequencyHz, 442.0, accuracy: 1.0)
+        }
+    }
+
+    func testReference442Reads440HzFlat() {
+        var smoother = PitchSmoother(sampleRate: sampleRate, referenceA4Hz: 442)
+        var last: PitchMeasurement = .idle
+        for _ in 0..<20 {
+            last = smoother.update(rawMeasurement(frequencyHz: 440.0), rms: voiceRMS)
+        }
+        // Same physical A4, but ~-7.85 cents below the 442 Hz grid.
+        XCTAssertEqual(last.midiNote, 69)
+        XCTAssertEqual(last.noteName, "A4")
+        XCTAssertLessThan(last.cents, -7.0)
+    }
 }
