@@ -167,6 +167,7 @@ public final class AudioEngine {
     private static let referenceA4HzKey = "referenceA4Hz"
     private static let metronomeVolumeKey = "metronomeVolume"
     private static let metronomeBPMKey = "metronomeBPM"
+    private static let metronomeSoundKey = "metronomeSound"
 
     private let engine = AVAudioEngine()
     private var metronomeEngine: MetronomeEngine?
@@ -193,6 +194,10 @@ public final class AudioEngine {
         // clamped to the supported range.
         let storedBPM = UserDefaults.standard.object(forKey: Self.metronomeBPMKey) as? Double
         metronome.bpm = Self.clampBPM(storedBPM ?? metronome.bpm)
+
+        // Restore the persisted click sound (falls back to `.classic`).
+        let storedSound = UserDefaults.standard.string(forKey: Self.metronomeSoundKey) ?? ""
+        metronome.sound = MetronomeSound(rawValue: storedSound) ?? .classic
 
         observeAudioLifecycle()
     }
@@ -242,6 +247,21 @@ public final class AudioEngine {
         metronomeEngine?.setVolume(clamped)
     }
 
+    /// Selects the click timbre and persists it. Applies live while the
+    /// metronome is running.
+    public func setMetronomeSound(_ sound: MetronomeSound) {
+        guard sound != metronome.sound else { return }
+        metronome.sound = sound
+        UserDefaults.standard.set(sound.rawValue, forKey: Self.metronomeSoundKey)
+        metronomeEngine?.setSound(sound)
+    }
+
+    /// Plays a short preview of `sound` (four accented-then-normal clicks)
+    /// without starting, stopping, or advancing the metronome schedule.
+    public func previewMetronomeSound(_ sound: MetronomeSound) {
+        metronomeEngine?.preview(sound, beats: 4)
+    }
+
     public func setReferenceA4Hz(_ hz: Double) {
         let clamped = Self.clampReference(hz)
         guard clamped != referenceA4Hz else { return }
@@ -264,24 +284,23 @@ public final class AudioEngine {
 
         let input = engine.inputNode
         var inputFormat = input.outputFormat(forBus: 0)
-        // The input node can report a placeholder format with a zero (invalid)
-        // sample rate before the session is fully established. Fall back to the
-        // session's hardware rate, then a sane hardware default, so we never
-        // build the graph with a 0 Hz rate (which makes `AVAudioFormat(...)`
-        // return nil and force-unwrap below crash).
-        var rate = inputFormat.sampleRate
-        if rate <= 0 {
-            rate = AVAudioSession.sharedInstance().sampleRate
+        // Install the tap with the input node's OWN format, not a reconstructed
+        // "standard" format. Passing a format that differs from what the node
+        // produces (channel count, interleaving, or channel layout) makes
+        // `installTap` throw "Failed to create tap due to format mismatch" and
+        // crash on device. The node can still report a placeholder format with a
+        // zero (invalid) sample rate before the session is fully established; in
+        // that rare case only, fall back to the session's hardware rate, then a
+        // sane default.
+        if inputFormat.sampleRate <= 0 || !inputFormat.sampleRate.isFinite {
+            var rate = AVAudioSession.sharedInstance().sampleRate
+            if rate <= 0 || !rate.isFinite {
+                rate = 44_100
+            }
+            inputFormat = AVAudioFormat(standardFormatWithSampleRate: rate, channels: 1)
+                ?? inputFormat
         }
-        if rate <= 0 {
-            rate = 44_100
-        }
-        if rate <= 0 || !rate.isFinite {
-            rate = 44_100
-        }
-        sampleRate = rate
-        inputFormat = AVAudioFormat(standardFormatWithSampleRate: rate, channels: 1)
-            ?? inputFormat
+        sampleRate = inputFormat.sampleRate
 
         let clickBox = ClickRejectionBox(windowSeconds: 0.025)
 
@@ -291,6 +310,7 @@ public final class AudioEngine {
                                         accentFirstBeat: metronome.accentFirstBeat)
         metronomeEngine = metronome
         metronome.setVolume(self.metronome.volume)
+        metronome.setSound(self.metronome.sound)
         guard let outputFormat = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 2) else {
             // Cannot happen now (rate is a positive finite value), but degrade
             // gracefully instead of trapping if it ever did.

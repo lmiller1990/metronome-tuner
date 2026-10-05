@@ -29,25 +29,24 @@ struct PracticeView: View {
         }
         .preferredColorScheme(.dark)
         .sheet(isPresented: $showSettings) {
-            TuningSettingsView(referenceA4Hz: engine.referenceA4Hz) { newHz in
-                engine.setReferenceA4Hz(newHz)
-            }
+            TuningSettingsView(
+                referenceA4Hz: engine.referenceA4Hz,
+                sound: engine.metronome.sound,
+                onSelectReference: { engine.setReferenceA4Hz($0) },
+                onSelectSound: { engine.setMetronomeSound($0) },
+                onPreviewSound: { engine.previewMetronomeSound($0) }
+            )
         }
     }
 
     // MARK: - Top bar
 
     private var topBar: some View {
-        HStack {
-            Image(systemName: "line.3.horizontal")
-                .font(.system(size: 18, weight: .medium))
-                .foregroundStyle(Color.white.opacity(0.6))
-                .accessibilityHidden(true)
-            Spacer()
+        ZStack {
             Text("Tuner · Metronome")
                 .font(.system(size: 15, weight: .semibold, design: .rounded))
                 .foregroundStyle(.white)
-            Spacer()
+                .frame(maxWidth: .infinity)
             Button {
                 showSettings = true
             } label: {
@@ -57,6 +56,7 @@ struct PracticeView: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Tuning settings")
+            .frame(maxWidth: .infinity, alignment: .trailing)
         }
         .padding(.horizontal, 20)
         .padding(.top, 8)
