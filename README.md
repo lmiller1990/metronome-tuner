@@ -151,6 +151,61 @@ cannot be exercised here.
 
 ---
 
+## Architecture
+
+Data flows are directional and thread-safe by construction. The one rule that bit
+twice during bring-up: **realtime/background audio callbacks must be `nonisolated`,
+`@Sendable`, and must never touch `@MainActor` state.**
+
+```
+mic ──installTap──▶ MicProcessor.process (realtime messenger queue)
+                      │  copy PCM into a pre-allocated pool buffer (no alloc/lock)
+                      ▼
+                 serial DSP queue (com.example.violinpractice.pitch)
+                      │  ClickRejection.skip? → RMS → YIN (PitchDetector)
+                      │  → PitchSmoother → PitchMeasurement
+                      ▼
+                 Task { @MainActor } → engine.pitch  (SwiftUI observes)
+
+engine.metronome (MetronomeState, @MainActor) ◀── setBPM/start/stop (UI buttons)
+                                                      │
+metronomeEngine (AVAudioSourceNode render block) ◀─────┘
+   render() → sample-accurate click scheduling on the audio timeline
+            → registers each click's host time with ClickRejectionBox
+            → engine.pendulumPhase derived from last click host time
+```
+
+- **`ViolinPracticeCore`** — pure, mic-free, unit-tested (`Sources/`). Models +
+  MusicTheory + YIN (`PitchDetector`) + smoothing (`PitchSmoother`) + click
+  rejection (`ClickRejection`) + pure beat math (`MetronomeScheduler`). No
+  AVFoundation, no UI.
+- **`App/Audio/AudioEngine.swift`** — `@Observable @MainActor` seam. Owns the
+  `AVAudioSession` + `AVAudioEngine` graph, the `MicProcessor`, and publishes
+  `pitch`/`metronome`/`pendulumPhase`. Construct it **on the main actor**
+  (`MainActor.run { AudioEngine() }` in the app entry), not as a stored `@State`
+  default — a `@MainActor` init off the main thread traps at startup.
+- **`App/Audio/MetronomeEngine.swift`** — `AVAudioSourceNode` render block doing
+  sample-accurate click scheduling (never `Timer`/`DispatchSourceTimer`). Guarded
+  by an unfair lock; allocation-free in the render path.
+- **Shared clock** — `HostClock` (mach host time) is used for *both* click times
+  and mic-frame times so `ClickRejection` compares like-for-like (input and output
+  node sample clocks drift, so they are never mixed).
+- **Views** (`App/Views/`) — read state through the `AudioEngine` seam only; zero
+  DSP/audio logic.
+
+### Concurrency boundaries (why they matter)
+
+- Mic tap closure is `@Sendable` and captures only the `@unchecked Sendable`
+  `MicProcessor` — it runs on AVFoundation's realtime messenger queue, *not* the
+  main actor. Making it implicitly `@MainActor` (inheriting from `buildGraph()`)
+  caused the startup `_dispatch_assert_queue_fail` crash.
+- Background DSP publishes results via `Task { @MainActor in engine.pitch = … }` —
+  never writes `@Observable` state directly from a background thread.
+- `MainActor.assumeIsolated` was replaced with `Task { @MainActor }` — the former
+  traps if the assumption is ever wrong.
+
+---
+
 ## Debugging device crashes
 
 To see why a device run crashed, pull the `.ips` crash logs off the phone and read

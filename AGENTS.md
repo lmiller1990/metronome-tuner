@@ -12,7 +12,8 @@ more precise about code layout and signatures).
 
 ### Environment facts (verified)
 - macOS, Xcode 27.0, Swift 6.4, Apple Silicon.
-- Homebrew installed. `xcodegen` NOT installed. No iOS simulator runtime downloaded.
+- Homebrew installed. `xcodegen` installed (2.46.0; `brew install xcodegen` if missing).
+- No iOS simulator runtime downloaded on this machine.
 - Therefore: deterministic tests run on macOS via `swift test` (Swift Package). The iOS app is
   generated with XcodeGen and compile-verified with `xcodebuild build` (no simulator needed to
   *compile*; running requires a device or a downloaded runtime — that is the user's hardware step).
@@ -126,7 +127,7 @@ public struct MetronomeState: Equatable, Sendable {
 }
 
 // PitchDetector.swift  (YIN)
-public struct PitchDetector {
+public struct PitchDetector: Sendable {
     public init(sampleRate: Double, threshold: Double = 0.15)
     /// Pure YIN. Returns (frequencyHz, confidence) or (nil, 0) if no periodicity detected.
     /// Operates on the passed mono buffer; retains no state.
@@ -200,7 +201,7 @@ the fixed tree + contracts; **F** is the AVFoundation integration owner; **G** i
 
 ### A. Scaffolding + package + app entry
 - **Owns:** `Package.swift`, `project.yml`, `.gitignore`, `App/Info.plist`,
-  `App/Assets.xcassets/`, `App/App/ViolinPracticeApp.swift`.
+  `App/Assets.xcassets/`, `App/ViolinPracticeApp.swift`.
 - **Package.swift:** library target `ViolinPracticeCore`, platforms `[.iOS(.v17), .macOS(.v13)]`,
   test target `ViolinPracticeCoreTests`; zero dependencies.
 - **project.yml:** app target `ViolinPractice`, iOS 17+, `TARGETED_DEVICE_FAMILY = 1` (iPhone),
