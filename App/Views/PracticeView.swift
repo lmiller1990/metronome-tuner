@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import ViolinPracticeCore
 
 /// Single practice screen: top bar, tuner (upper ~half) and metronome (lower half).
@@ -28,6 +29,15 @@ struct PracticeView: View {
             .background(Color.black.ignoresSafeArea())
         }
         .preferredColorScheme(.dark)
+        .onAppear {
+            // Keep the screen from auto-locking while the practice screen is up
+            // (the whole point of the app). Restored on disappear so the device
+            // still sleeps normally elsewhere.
+            UIApplication.shared.isIdleTimerDisabled = true
+        }
+        .onDisappear {
+            UIApplication.shared.isIdleTimerDisabled = false
+        }
         .sheet(isPresented: $showSettings) {
             TuningSettingsView(
                 referenceA4Hz: engine.referenceA4Hz,
