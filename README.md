@@ -19,6 +19,9 @@ Key design goals (see `PLAN.md` and `AGENTS.md` for the full spec):
   level separately from the system volume (`MetronomeState.volume`, persisted).
   Clicks are synthesised near full scale; the slider runs 0–4× so values past
   unity add gain with soft limiting for a genuinely louder, distortion-free click.
+- **Selectable metronome sounds** — Classic, Woodblock, Beep, Digital, Rimshot,
+  and two bundled clap samples (Clap 1 / Clap 2, loaded from `clap1.wav` and
+  `clap2.wav`), each previewable from Settings.
 - **Configurable A4 reference** — tap ⚙ to set the concert pitch (415–466 Hz;
   presets 415/432/440/442/443/444 plus a fine slider/stepper). The tuner's note
   grid, cents, and the "A4 = …" label all follow the chosen reference, which is

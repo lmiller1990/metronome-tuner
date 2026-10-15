@@ -274,12 +274,13 @@ final class MetronomeEngine: @unchecked Sendable {
 
     // MARK: - Click synthesis (runs once, off the audio thread)
 
-    /// Pre-rendered click: a deep decaying body tone, a low thump for weight, and
-    /// a broadband noise attack transient. Every beat renders the identical click
-    /// (no downbeat accent), and each is peak-normalized to 0.98 full scale.
+    /// Pre-rendered click buffer per sound. Tonal sounds are synthesised; the two
+    /// claps are loaded from bundled `.wav` samples. Every beat renders the same
+    /// click (no downbeat accent), and each buffer is peak-normalized to 0.98.
     private static func makeClick(sampleRate: Double, sound: MetronomeSound) -> [Float] {
         switch sound {
-        case .clap: return makeClap(sampleRate: sampleRate)
+        case .clap1: return loadClap("clap1", sampleRate: sampleRate)
+        case .clap2: return loadClap("clap2", sampleRate: sampleRate)
         case .rimshot: return makeRimshot(sampleRate: sampleRate)
         case .classic, .woodblock, .beep, .digital:
             return makeTonalClick(sampleRate: sampleRate, sound: sound)
@@ -328,7 +329,7 @@ final class MetronomeEngine: @unchecked Sendable {
             dur = 0.045; freq = 1100; decay = 100
             noiseDur = 0.002; noiseAmt = 0.5; harmonic2 = 0.0
             thumpFreq = 180; thumpAmp = 0.8
-        case .clap, .rimshot:
+        case .clap1, .clap2, .rimshot:
             fatalError("makeTonalClick does not support \(sound)")
         }
 
@@ -346,60 +347,35 @@ final class MetronomeEngine: @unchecked Sendable {
         return normalizePeak(s, to: 0.98)
     }
 
-    /// Hand clap: a damped "hand cavity" body resonance plus a cluster of
-    /// low-passed noise "finger" transients and a short room tail. The noise is
-    /// one-pole low-passed — never the raw first-difference (`w - prev`), which is
-    /// a high-pass and is what produced the hissy/whiny "not nice" timbre.
-    private static func makeClap(sampleRate: Double) -> [Float] {
-        var seed: UInt64 = 0x9E3779B97F4A7C15
-        func nextUnit() -> Float {
-            seed = seed &* 6364136223846793005 &+ 1442695040888963407
-            // Logical shift on the UInt64 keeps the result in [0, 1). Shifting an
-            // Int64 (arithmetic shift) would yield negatives here, which fed
-            // negative sample indices into the transient loop (index-out-of-range).
-            return Float(seed >> 40) / Float(1 << 24)
-        }
-        func nextNoise() -> Float {
-            nextUnit() * 2 - 1
-        }
+    /// Loads a bundled `.wav` clap, converts it to mono Float32 at the engine's
+    /// sample rate, and peak-normalizes it. Runs once at init (off the render
+    /// thread), so the higher-level AVAudioFile/AVAudioConverter APIs are safe
+    /// here. Returns a short silent buffer if the asset is missing or undecodable,
+    /// so a missing file degrades to silence instead of crashing the render block.
+    private static func loadClap(_ resource: String, sampleRate: Double) -> [Float] {
+        let silent = { [Float](repeating: 0, count: max(1, Int(sampleRate * 0.05))) }
 
-        let dur = 0.12
-        let n = max(1, Int(sampleRate * dur))
-        var s = [Float](repeating: 0, count: n)
+        guard let url = Bundle.main.url(forResource: resource, withExtension: "wav"),
+              let file = try? AVAudioFile(forReading: url) else { return silent() }
 
-        // 1. Body resonance: the short "thump" of the palm cavity (~300 Hz).
-        let bodyFreq = 300.0
-        let bodyDecay = 0.03
-        for i in 0..<n {
-            let t = Double(i) / sampleRate
-            s[i] += Float(sin(2 * .pi * bodyFreq * t) * exp(-t / bodyDecay)) * 0.7
+        // Ask AVAudioFile to deliver mono Float32 at the engine's rate. Its
+        // internal converter performs sample-rate + channel + bit-depth
+        // conversion; AVAudioConverter's whole-buffer `convert(to:from:)`
+        // rejects sample-rate changes ("sample rate conversion not allowed").
+        guard let target = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1) else {
+            return silent()
         }
+        file.processingFormat = target
 
-        // 2. Finger transients: several staggered, low-passed noise pops.
-        let popCount = 9
-        for _ in 0..<popCount {
-            let start = 0.002 + Double(nextUnit()) * 0.022
-            let amp = 0.45 + nextUnit() * 0.55
-            let burstLen = Int(sampleRate * (0.003 + Double(nextUnit()) * 0.005))
-            var lp: Float = 0
-            for j in 0..<burstLen {
-                let idx = Int(start * sampleRate) + j
-                if idx >= n { break }
-                let t = Double(j) / sampleRate
-                lp += (nextNoise() - lp) * 0.22          // one-pole low-pass
-                s[idx] += lp * Float(exp(-t / 0.003)) * amp
-            }
-        }
+        // Capacity is generous (2 s) so a single read captures the whole clap;
+        // `read(into:)` stops at EOF and reports the actual frames read.
+        let capacity = AVAudioFrameCount(max(1, Int(sampleRate * 2)))
+        guard let buffer = AVAudioPCMBuffer(pcmFormat: target, frameCapacity: capacity),
+              (try? file.read(into: buffer, frameCount: capacity)) != nil else { return silent() }
 
-        // 3. Room tail: very low-passed, low-amplitude noise.
-        var tailLP: Float = 0
-        for i in 0..<n {
-            let t = Double(i) / sampleRate
-            tailLP += (nextNoise() - tailLP) * 0.04
-            s[i] += tailLP * Float(exp(-t / 0.04)) * 0.25
-        }
-
-        return normalizePeak(s, to: 0.98)
+        let frames = Int(buffer.frameLength)
+        guard frames > 0, let channel = buffer.floatChannelData?[0] else { return silent() }
+        return normalizePeak(Array(UnsafeBufferPointer(start: channel, count: frames)), to: 0.98)
     }
 
     /// Rimshot: a sharp "stick" click (very short bright noise) plus a

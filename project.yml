@@ -18,6 +18,10 @@ targets:
       - path: App/Assets.xcassets
       - path: App/Info.plist
       - path: App/PrivacyInfo.xcprivacy
+      - path: clap1.wav
+        buildPhase: resources
+      - path: clap2.wav
+        buildPhase: resources
     dependencies:
       - package: ViolinPracticeCore
     settings:
@@ -28,7 +32,7 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         SWIFT_VERSION: "6.0"
         CODE_SIGN_STYLE: Automatic
-        DEVELOPMENT_TEAM: ""
+        DEVELOPMENT_TEAM: "9HAD7Y59FC"
 
 schemes:
   ViolinPractice:
