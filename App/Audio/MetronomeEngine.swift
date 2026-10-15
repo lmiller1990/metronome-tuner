@@ -358,23 +358,40 @@ final class MetronomeEngine: @unchecked Sendable {
         guard let url = Bundle.main.url(forResource: resource, withExtension: "wav"),
               let file = try? AVAudioFile(forReading: url) else { return silent() }
 
-        // Ask AVAudioFile to deliver mono Float32 at the engine's rate. Its
-        // internal converter performs sample-rate + channel + bit-depth
-        // conversion; AVAudioConverter's whole-buffer `convert(to:from:)`
-        // rejects sample-rate changes ("sample rate conversion not allowed").
-        guard let target = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1) else {
+        let srcFormat = file.processingFormat
+        let srcFrames = AVAudioFrameCount(file.length)
+        guard let srcBuffer = AVAudioPCMBuffer(pcmFormat: srcFormat, frameCapacity: srcFrames) else {
             return silent()
         }
-        file.processingFormat = target
+        do { try file.read(into: srcBuffer, frameCount: srcFrames) } catch { return silent() }
 
-        // Capacity is generous (2 s) so a single read captures the whole clap;
-        // `read(into:)` stops at EOF and reports the actual frames read.
-        let capacity = AVAudioFrameCount(max(1, Int(sampleRate * 2)))
-        guard let buffer = AVAudioPCMBuffer(pcmFormat: target, frameCapacity: capacity),
-              (try? file.read(into: buffer, frameCount: capacity)) != nil else { return silent() }
+        guard let dstFormat = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1),
+              let converter = AVAudioConverter(from: srcFormat, to: dstFormat) else { return silent() }
 
-        let frames = Int(buffer.frameLength)
-        guard frames > 0, let channel = buffer.floatChannelData?[0] else { return silent() }
+        let ratio = sampleRate / srcFormat.sampleRate
+        let dstCapacity = AVAudioFrameCount((Double(srcFrames) * ratio).rounded(.up) + 1024)
+        guard let dstBuffer = AVAudioPCMBuffer(pcmFormat: dstFormat, frameCapacity: dstCapacity) else {
+            return silent()
+        }
+
+        // Streaming conversion — supports sample-rate conversion, unlike the
+        // whole-buffer `convert(to:from:)`. The input block hands over the full
+        // source buffer once, then signals end-of-stream.
+        var fed = false
+        var error: NSError?
+        let status = converter.convert(to: dstBuffer, error: &error) { _, inStatus in
+            if fed {
+                inStatus.pointee = .endOfStream
+                return nil
+            }
+            fed = true
+            inStatus.pointee = .haveData
+            return srcBuffer
+        }
+        guard status == .haveData || status == .endOfStream else { return silent() }
+
+        let frames = Int(dstBuffer.frameLength)
+        guard frames > 0, let channel = dstBuffer.floatChannelData?[0] else { return silent() }
         return normalizePeak(Array(UnsafeBufferPointer(start: channel, count: frames)), to: 0.98)
     }
 
