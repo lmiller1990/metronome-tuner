@@ -6,7 +6,7 @@ import Foundation
 /// Kept separate (and free of any state or animation) so the phase → angle mapping
 /// is a pure, testable function of its input.
 enum PendulumGeometry {
-    static let maxAngleDegrees = 32.0
+    static let maxAngleDegrees = 42.0
 
     /// `phase` is 0…1 progress through the current beat, from `AudioEngine.pendulumPhase`.
     /// The arm performs one full, continuous left→right→left swing per beat: it is at an
@@ -29,7 +29,7 @@ struct PendulumView: View {
 
     var body: some View {
         GeometryReader { geo in
-            let length = max(60, min(geo.size.height - 16, geo.size.width * 0.52))
+            let length = max(60, min(geo.size.height - 16, geo.size.width * 0.62))
             ZStack(alignment: .top) {
                 tickMarks(length: length)
                 arm(length: length)
@@ -45,18 +45,18 @@ struct PendulumView: View {
             VStack(spacing: 0) {
                 Capsule()
                     .fill(Color.white.opacity(0.85))
-                    .frame(width: 4, height: max(24, length - 26))
+                    .frame(width: 5, height: max(28, length - 30))
                 Circle()
                     .fill(Color.green)
-                    .frame(width: 20, height: 20)
-                    .shadow(color: Color.green.opacity(0.4), radius: 7)
+                    .frame(width: 24, height: 24)
+                    .shadow(color: Color.green.opacity(0.4), radius: 8)
             }
-            .frame(width: 24, height: length, alignment: .top)
+            .frame(width: 28, height: length, alignment: .top)
             .rotationEffect(.degrees(angle), anchor: .top)
 
             Circle()
                 .fill(Color.white.opacity(0.7))
-                .frame(width: 12, height: 12)
+                .frame(width: 14, height: 14)
         }
     }
 
@@ -73,8 +73,8 @@ struct PendulumView: View {
                 let isCentre = abs(value) < 0.1
                 Capsule()
                     .fill(Color.white.opacity(isCentre ? 0.30 : 0.16))
-                    .frame(width: 2, height: isCentre ? 12 : 8)
-                    .frame(width: 2, height: radius, alignment: .bottom)
+                    .frame(width: 2.5, height: isCentre ? 14 : 9)
+                    .frame(width: 2.5, height: radius, alignment: .bottom)
                     .rotationEffect(.degrees(value), anchor: .top)
             }
         }

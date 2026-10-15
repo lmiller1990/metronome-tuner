@@ -22,8 +22,11 @@ struct PracticeView: View {
                 topBar
                 referenceLabel
                 tuner
-                    .frame(height: max(200, geo.size.height * 0.50))
-                metronome
+                    .frame(height: geo.size.height * 0.43)
+                divider
+                pendulum
+                    .frame(height: geo.size.height * 0.35)
+                controls
                     .frame(maxHeight: .infinity)
             }
             .background(Color.black.ignoresSafeArea())
@@ -79,7 +82,7 @@ struct PracticeView: View {
         Text("A4 = \(Self.formatHz(engine.referenceA4Hz)) Hz")
             .font(.system(size: 12, weight: .medium, design: .rounded))
             .foregroundStyle(Color.white.opacity(0.35))
-            .padding(.bottom, 4)
+            .padding(.bottom, 2)
     }
 
     /// Formats a hertz value without trailing noise: whole numbers drop the
@@ -102,34 +105,39 @@ struct PracticeView: View {
         .padding(.horizontal, 20)
     }
 
+    /// Thin separator between the tuner and metronome regions.
+    private var divider: some View {
+        Rectangle()
+            .fill(Color.white.opacity(0.08))
+            .frame(height: 1)
+            .padding(.horizontal, 20)
+    }
+
     // MARK: - Metronome
 
-    private var metronome: some View {
-        VStack(spacing: 6) {
-            MetronomeControls(
-                bpm: engine.metronome.bpm,
-                onDecrement: { step(-1) },
-                onIncrement: { step(1) }
-            )
-            .padding(.top, 4)
-
-            ZStack {
-                PendulumView(phase: engine.pendulumPhase)
-                    .frame(maxWidth: 360, maxHeight: .infinity)
-                HStack {
-                    Text("\(engine.metronome.beatsPerMeasure)/4")
-                        .font(.system(size: 14, weight: .semibold, design: .rounded))
-                        .foregroundStyle(Color.white.opacity(0.4))
-                    Spacer(minLength: 0)
-                }
-            }
-            .frame(maxHeight: .infinity)
+    private var pendulum: some View {
+        PendulumView(phase: engine.pendulumPhase)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .padding(.horizontal, 24)
+    }
 
+    private var controls: some View {
+        VStack(spacing: 12) {
+            HStack(spacing: 16) {
+                MetronomeControls(
+                    bpm: engine.metronome.bpm,
+                    onDecrement: { step(-1) },
+                    onIncrement: { step(1) }
+                )
+                Text("\(engine.metronome.beatsPerMeasure)/4")
+                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(Color.white.opacity(0.4))
+            }
             startStopButton
         }
         .padding(.horizontal, 20)
-        .padding(.bottom, 12)
+        .padding(.bottom, 16)
     }
 
     private var startStopButton: some View {
@@ -145,12 +153,12 @@ struct PracticeView: View {
                 Image(systemName: running ? "stop.fill" : "play.fill")
                 Text(running ? "Stop" : "Start")
             }
-            .font(.system(size: 19, weight: .bold, design: .rounded))
+            .font(.system(size: 17, weight: .bold, design: .rounded))
             .foregroundStyle(.black)
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 16)
+            .frame(height: 56)
             .background(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .fill(running ? Color.red.opacity(0.9) : Color.green)
             )
         }

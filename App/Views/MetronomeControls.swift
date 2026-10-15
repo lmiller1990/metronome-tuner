@@ -11,21 +11,21 @@ struct MetronomeControls: View {
     let onIncrement: () -> Void
 
     var body: some View {
-        HStack(spacing: 14) {
+        HStack(spacing: 10) {
             StepButton(systemName: "minus", action: onDecrement)
             VStack(spacing: -2) {
                 Text("\(displayedBPM)")
-                    .font(.system(size: 32, weight: .bold, design: .rounded))
+                    .font(.system(size: 28, weight: .bold, design: .rounded))
                     .monospacedDigit()
                     .foregroundStyle(.white)
                     .contentTransition(.numericText())
                     .animation(.easeOut(duration: 0.12), value: displayedBPM)
                 Text(MusicTheory.tempoMarking(bpm: bpm))
-                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .font(.system(size: 9, weight: .semibold, design: .rounded))
                     .tracking(1.2)
                     .foregroundStyle(Color.white.opacity(0.5))
             }
-            .frame(minWidth: 76)
+            .frame(minWidth: 68)
             StepButton(systemName: "plus", action: onIncrement)
         }
     }
