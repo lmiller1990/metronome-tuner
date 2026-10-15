@@ -218,7 +218,6 @@ final class MusicTheoryTests: XCTestCase {
         XCTAssertEqual(state.beatsPerMeasure, 4)
         XCTAssertFalse(state.isRunning)
         XCTAssertEqual(state.currentBeat, 0)
-        XCTAssertTrue(state.accentFirstBeat)
     }
 
     func testMetronomeStateBPMRange() {

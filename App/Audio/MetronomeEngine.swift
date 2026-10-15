@@ -20,13 +20,13 @@ final class MetronomeEngine: @unchecked Sendable {
         var samplesPerBeat: Double = 44_100
         var beatNumber = 0            // 0 before the first click; 1...beatsPerMeasure after
         var beatsPerMeasure = 4
-        var accentFirstBeat = true
         /// Host time (seconds) of the most recent click, for pendulum phase.
         var lastBeatHostSeconds: Double = 0
-        /// Independent output gain for the clicks (0...1), applied in the render
-        /// block. Kept here so it is read under the same lock as the schedule.
+        /// Independent output gain for the clicks (0...4), applied in the render
+        /// block; >1 is soft-limited. Kept here so it is read under the same lock
+        /// as the schedule.
         var volume: Double = 1
-        /// Index into the pre-rendered `accentBySound`/`normalBySound` arrays.
+        /// Index into the pre-rendered `clicksBySound` array.
         var soundIndex = 0
         /// Number of preview clicks still to schedule (0 = no preview pending).
         var previewBeatsRemaining = 0
@@ -34,13 +34,10 @@ final class MetronomeEngine: @unchecked Sendable {
         var previewNextSample: Double = 0
         var previewInitialized = false
         var previewSoundIndex = 0
-        /// Accents only the first preview beat, then flips to normal.
-        var previewAccent = true
     }
 
     private struct RenderBeat {
         var offset: Double = 0        // frame offset into the current render buffer
-        var accent = false
         var hostSeconds: Double = 0
         var soundIndex = 0
     }
@@ -52,8 +49,7 @@ final class MetronomeEngine: @unchecked Sendable {
     private let sampleRate: Double
     /// Pre-rendered click buffers, indexed by `Schedule.soundIndex` /
     /// `RenderBeat.soundIndex` in `MetronomeSound.allCases` order.
-    private let accentBySound: [[Float]]
-    private let normalBySound: [[Float]]
+    private let clicksBySound: [[Float]]
     /// `MetronomeSound -> array index`; consulted only off the render thread
     /// (in `setSound`/`preview`), never inside `render`.
     private let soundIndices: [MetronomeSound: Int]
@@ -63,21 +59,16 @@ final class MetronomeEngine: @unchecked Sendable {
 
     init(sampleRate: Double,
          clickBox: ClickRejectionBox,
-         beatsPerMeasure: Int = 4,
-         accentFirstBeat: Bool = true) {
+         beatsPerMeasure: Int = 4) {
         self.sampleRate = sampleRate
         self.clickBox = clickBox
-        self.accentBySound = MetronomeSound.allCases.map { sound in
-            MetronomeEngine.makeClick(sampleRate: sampleRate, sound: sound, accent: true)
-        }
-        self.normalBySound = MetronomeSound.allCases.map { sound in
-            MetronomeEngine.makeClick(sampleRate: sampleRate, sound: sound, accent: false)
+        self.clicksBySound = MetronomeSound.allCases.map { sound in
+            MetronomeEngine.makeClick(sampleRate: sampleRate, sound: sound)
         }
         self.soundIndices = Dictionary(uniqueKeysWithValues:
             MetronomeSound.allCases.enumerated().map { ($0.element, $0.offset) })
         schedule.samplesPerBeat = max(1, sampleRate * MetronomeScheduler.secondsPerBeat(bpm: 60))
         schedule.beatsPerMeasure = beatsPerMeasure
-        schedule.accentFirstBeat = accentFirstBeat
     }
 
     func attach(to engine: AVAudioEngine, format: AVAudioFormat) {
@@ -120,9 +111,12 @@ final class MetronomeEngine: @unchecked Sendable {
         }
     }
 
-    /// Sets the click output gain (clamped to 0...1). Safe to call while running.
+    /// Sets the click output gain (clamped to `MetronomeState.volumeRange`).
+    /// Values above 1 are boosted and soft-limited in the render block. Safe to
+    /// call while running.
     func setVolume(_ volume: Double) {
-        let clamped = min(max(volume, 0), 1)
+        let clamped = min(max(volume, MetronomeState.volumeRange.lowerBound),
+                          MetronomeState.volumeRange.upperBound)
         lock.withLock {
             schedule.volume = clamped
         }
@@ -146,7 +140,6 @@ final class MetronomeEngine: @unchecked Sendable {
             schedule.previewBeatsRemaining = max(0, beats)
             schedule.previewInitialized = false
             schedule.previewSoundIndex = index
-            schedule.previewAccent = true
         }
     }
 
@@ -189,11 +182,9 @@ final class MetronomeEngine: @unchecked Sendable {
                 while schedule.nextBeatSample < end, beatCount < pendingBeats.count {
                     let offset = schedule.nextBeatSample - sampleTime
                     schedule.beatNumber = schedule.beatNumber % schedule.beatsPerMeasure + 1
-                    let accent = schedule.accentFirstBeat && schedule.beatNumber == 1
                     let clickHostSeconds = hostSeconds + (schedule.nextBeatSample - sampleTime) / sampleRate
                     schedule.lastBeatHostSeconds = clickHostSeconds
                     pendingBeats[beatCount] = RenderBeat(offset: offset,
-                                                         accent: accent,
                                                          hostSeconds: clickHostSeconds,
                                                          soundIndex: schedule.soundIndex)
                     beatCount += 1
@@ -213,11 +204,8 @@ final class MetronomeEngine: @unchecked Sendable {
                       schedule.previewNextSample < end,
                       beatCount < pendingBeats.count {
                     let offset = schedule.previewNextSample - sampleTime
-                    let accent = schedule.previewAccent
-                    schedule.previewAccent = false
                     let clickHostSeconds = hostSeconds + (schedule.previewNextSample - sampleTime) / sampleRate
                     pendingBeats[beatCount] = RenderBeat(offset: offset,
-                                                         accent: accent,
                                                          hostSeconds: clickHostSeconds,
                                                          soundIndex: schedule.previewSoundIndex)
                     beatCount += 1
@@ -236,7 +224,7 @@ final class MetronomeEngine: @unchecked Sendable {
                 let beat = pendingBeats[i]
                 clickBox.register(atSeconds: beat.hostSeconds)
                 guard gain > 0 else { continue }
-                mix(click: beat.accent ? accentBySound[beat.soundIndex] : normalBySound[beat.soundIndex],
+                mix(click: clicksBySound[beat.soundIndex],
                     gain: gain,
                     at: beat.offset,
                     into: audioBufferList,
@@ -266,6 +254,10 @@ final class MetronomeEngine: @unchecked Sendable {
                      frameCount: Int) {
         let start = Int(offset.rounded(.down))
         guard start < frameCount else { return }
+        // Gains above unity soft-clip so boosted clicks get louder (more RMS)
+        // without wrapping into harsh digital clipping. `tanhf` is a libm call:
+        // allocation-free and lock-free, safe on the render thread.
+        let softClip = gain > 1.0
         for buffer in UnsafeMutableAudioBufferListPointer(audioBufferList) {
             guard let data = buffer.mData else { continue }
             let maxFrames = Int(buffer.mDataByteSize) / MemoryLayout<Float>.size
@@ -273,32 +265,32 @@ final class MetronomeEngine: @unchecked Sendable {
             guard n > 0 else { continue }
             let floats = data.assumingMemoryBound(to: Float.self)
             for i in 0..<n {
-                floats[start + i] += click[i] * gain
+                var sample = click[i] * gain
+                if softClip { sample = tanhf(sample) }
+                floats[start + i] += sample
             }
         }
     }
 
     // MARK: - Click synthesis (runs once, off the audio thread)
 
-    /// Pre-rendered click: a fast-decaying body tone plus a broadband noise
-    /// attack transient, so the tick cuts through even at low system volume.
-    /// Each sound has a distinct timbre; accent vs normal stays distinguishable
-    /// by a brighter/higher frequency rather than amplitude alone. Every click
-    /// is peak-normalized to 0.98 full scale.
-    private static func makeClick(sampleRate: Double, sound: MetronomeSound, accent: Bool) -> [Float] {
+    /// Pre-rendered click: a deep decaying body tone, a low thump for weight, and
+    /// a broadband noise attack transient. Every beat renders the identical click
+    /// (no downbeat accent), and each is peak-normalized to 0.98 full scale.
+    private static func makeClick(sampleRate: Double, sound: MetronomeSound) -> [Float] {
         switch sound {
-        case .clap: return makeClap(sampleRate: sampleRate, accent: accent)
-        case .rimshot: return makeRimshot(sampleRate: sampleRate, accent: accent)
+        case .clap: return makeClap(sampleRate: sampleRate)
+        case .rimshot: return makeRimshot(sampleRate: sampleRate)
         case .classic, .woodblock, .beep, .digital:
-            return makeTonalClick(sampleRate: sampleRate, sound: sound, accent: accent)
+            return makeTonalClick(sampleRate: sampleRate, sound: sound)
         }
     }
 
-    /// Tonal clicks: a fast-decaying body tone plus a broadband noise attack
-    /// transient, so the tick cuts through even at low system volume. Each of the
-    /// four tonal sounds has a distinct timbre; accent vs normal stays
-    /// distinguishable by a brighter/higher frequency rather than amplitude alone.
-    private static func makeTonalClick(sampleRate: Double, sound: MetronomeSound, accent: Bool) -> [Float] {
+    /// Tonal clicks: a deep decaying body tone, a low thump for weight, and a
+    /// broadband noise attack transient. The body decays slowly enough to carry
+    /// real energy (louder perceived level) without bleeding into the next beat
+    /// at the maximum tempo. One uniform synthesis — no downbeat accent.
+    private static func makeTonalClick(sampleRate: Double, sound: MetronomeSound) -> [Float] {
         var seed: UInt64 = 0x9E3779B97F4A7C15
         func nextNoise() -> Float {
             seed = seed &* 6364136223846793005 &+ 1442695040888963407
@@ -316,39 +308,47 @@ final class MetronomeEngine: @unchecked Sendable {
         let noiseDur: Double
         let noiseAmt: Double
         let harmonic2: Double
+        let thumpFreq: Double
+        let thumpAmp: Double
 
         switch sound {
         case .classic:
-            dur = 0.032; freq = accent ? 2200 : 1700; decay = 160
-            noiseDur = 0.004; noiseAmt = 0.6; harmonic2 = 0.0
+            dur = 0.07; freq = 800; decay = 45
+            noiseDur = 0.004; noiseAmt = 0.45; harmonic2 = 0.25
+            thumpFreq = 130; thumpAmp = 1.0
         case .woodblock:
-            dur = 0.05; freq = accent ? 1150 : 880; decay = 70
-            noiseDur = 0.006; noiseAmt = 0.9; harmonic2 = 0.35
+            dur = 0.09; freq = 550; decay = 28
+            noiseDur = 0.006; noiseAmt = 0.7; harmonic2 = 0.4
+            thumpFreq = 110; thumpAmp = 1.0
         case .beep:
-            dur = 0.09; freq = accent ? 1200 : 950; decay = 26
-            noiseDur = 0.003; noiseAmt = 0.12; harmonic2 = 0.0
+            dur = 0.16; freq = 650; decay = 10
+            noiseDur = 0.003; noiseAmt = 0.08; harmonic2 = 0.0
+            thumpFreq = 150; thumpAmp = 0.35
         case .digital:
-            dur = 0.022; freq = accent ? 3400 : 2800; decay = 240
-            noiseDur = 0.002; noiseAmt = 0.7; harmonic2 = 0.0
+            dur = 0.045; freq = 1100; decay = 100
+            noiseDur = 0.002; noiseAmt = 0.5; harmonic2 = 0.0
+            thumpFreq = 180; thumpAmp = 0.8
         case .clap, .rimshot:
             fatalError("makeTonalClick does not support \(sound)")
         }
 
         let n = max(1, Int(sampleRate * dur))
+        let thumpDecay = dur * 0.6
         var s = [Float](repeating: 0, count: n)
         for i in 0..<n {
             let t = Double(i) / sampleRate
             let body = sin(2 * .pi * freq * t) + harmonic2 * sin(4 * .pi * freq * t)
             let env = exp(-decay * t)
             let noiseEnv = exp(-t / noiseDur) * noiseAmt
-            s[i] = Float(body * env + Double(nextNoise()) * noiseEnv)
+            let thump = thumpAmp * sin(2 * .pi * thumpFreq * t) * exp(-t / thumpDecay)
+            s[i] = Float(body * env + thump + Double(nextNoise()) * noiseEnv)
         }
         return normalizePeak(s, to: 0.98)
     }
 
     /// Hand clap: several short bright-noise "finger" transients clustered in the
     /// first ~20 ms, plus a damped "room" tail.
-    private static func makeClap(sampleRate: Double, accent: Bool) -> [Float] {
+    private static func makeClap(sampleRate: Double) -> [Float] {
         var seed: UInt64 = 0x9E3779B97F4A7C15
         func nextUnit() -> Float {
             seed = seed &* 6364136223846793005 &+ 1442695040888963407
@@ -361,11 +361,11 @@ final class MetronomeEngine: @unchecked Sendable {
             nextUnit() * 2 - 1
         }
 
-        let dur = accent ? 0.14 : 0.11
+        let dur = 0.13
         let n = max(1, Int(sampleRate * dur))
         var s = [Float](repeating: 0, count: n)
 
-        let transientCount = accent ? 7 : 4
+        let transientCount = 6
         for _ in 0..<transientCount {
             let start = 0.004 + Double(nextUnit()) * 0.014
             let amp = 0.55 + nextUnit() * 0.45
@@ -383,7 +383,7 @@ final class MetronomeEngine: @unchecked Sendable {
         }
 
         var prev: Float = 0
-        let tailDecay = accent ? 0.035 : 0.028
+        let tailDecay = 0.032
         for i in 0..<n {
             let t = Double(i) / sampleRate
             let w = nextNoise()
@@ -397,7 +397,7 @@ final class MetronomeEngine: @unchecked Sendable {
 
     /// Rimshot: a sharp "stick" click (very short bright noise) plus a
     /// fast-decaying high metallic ring.
-    private static func makeRimshot(sampleRate: Double, accent: Bool) -> [Float] {
+    private static func makeRimshot(sampleRate: Double) -> [Float] {
         var seed: UInt64 = 0x9E3779B97F4A7C15
         func nextUnit() -> Float {
             seed = seed &* 6364136223846793005 &+ 1442695040888963407
@@ -410,14 +410,14 @@ final class MetronomeEngine: @unchecked Sendable {
             nextUnit() * 2 - 1
         }
 
-        let dur = accent ? 0.06 : 0.05
+        let dur = 0.055
         let n = max(1, Int(sampleRate * dur))
         var s = [Float](repeating: 0, count: n)
 
-        let ringFreq = accent ? 5200.0 : 4200.0
+        let ringFreq = 4400.0
         let ring2 = ringFreq * 1.5
-        let ringAmp = accent ? 0.85 : 0.7
-        let ringDecay = accent ? 0.010 : 0.012
+        let ringAmp = 0.8
+        let ringDecay = 0.011
 
         var prev: Float = 0
         for i in 0..<n {

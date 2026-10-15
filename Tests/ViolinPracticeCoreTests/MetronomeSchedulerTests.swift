@@ -18,22 +18,20 @@ final class MetronomeSchedulerTests: XCTestCase {
         XCTAssertEqual(events.map(\.sampleIndex), [0, 22050])
     }
 
-    func testExactFourBeatSpanCyclesNumbersAndAccents() {
+    func testExactFourBeatSpanCyclesNumbers() {
         var scheduler = MetronomeScheduler(sampleRate: 44100, bpm: 120, beatsPerMeasure: 4)
         let events = scheduler.beats(inSampleRange: 0, 4 * 22050)
 
         XCTAssertEqual(events.count, 4)
         XCTAssertEqual(events.map(\.sampleIndex), [0, 22050, 44100, 66150])
         XCTAssertEqual(events.map(\.beatNumber), [1, 2, 3, 4])
-        XCTAssertEqual(events.map(\.isAccent), [true, false, false, false])
     }
 
-    func testBeatNumbersCycleAcrossMeasuresWithAccentOnlyOnBeatOne() {
+    func testBeatNumbersCycleAcrossMeasures() {
         var scheduler = MetronomeScheduler(sampleRate: 44100, bpm: 120, beatsPerMeasure: 4)
         let events = scheduler.beats(inSampleRange: 0, 8 * 22050)
 
         XCTAssertEqual(events.map(\.beatNumber), [1, 2, 3, 4, 1, 2, 3, 4])
-        XCTAssertEqual(events.filter(\.isAccent).map(\.beatNumber), [1, 1])
     }
 
     func testSetBPMMidSpanPreservesPhaseWithoutDoubleFire() {

@@ -6,8 +6,6 @@ public struct BeatEvent: Equatable, Sendable {
     public var sampleIndex: Int
     /// Beat within the measure, `1...beatsPerMeasure`. Beat 1 is the downbeat.
     public var beatNumber: Int
-    /// `true` for the first beat of each measure.
-    public var isAccent: Bool
 }
 
 /// Pure sample-domain metronome timing.
@@ -87,8 +85,7 @@ public struct MetronomeScheduler {
         var events: [BeatEvent] = []
         while nextBeatSample < rangeEnd {
             events.append(BeatEvent(sampleIndex: Int(nextBeatSample),
-                                    beatNumber: nextBeatNumber,
-                                    isAccent: nextBeatNumber == 1))
+                                    beatNumber: nextBeatNumber))
             advance()
         }
 

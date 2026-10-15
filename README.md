@@ -17,7 +17,8 @@ Key design goals (see `PLAN.md` and `AGENTS.md` for the full spec):
   metronome in the lower half.
 - **Independent metronome volume** — a slider under the pendulum sets the click
   level separately from the system volume (`MetronomeState.volume`, persisted).
-  Clicks are synthesised near full scale so the control has real range.
+  Clicks are synthesised near full scale; the slider runs 0–4× so values past
+  unity add gain with soft limiting for a genuinely louder, distortion-free click.
 - **Configurable A4 reference** — tap ⚙ to set the concert pitch (415–466 Hz;
   presets 415/432/440/442/443/444 plus a fine slider/stepper). The tuner's note
   grid, cents, and the "A4 = …" label all follow the chosen reference, which is
@@ -142,8 +143,7 @@ metronome + microphone pitch detection**.
    metronome is running, then hang up: the session should re-activate, the tuner
    resume, and the metronome restart. Plug in and unplug headphones: output should
    return to the speaker without going silent.
-8. **Accent** — Beat 1 of each 4/4 measure should sound distinctly accented
-   (louder/brighter) than beats 2–4.
+8. **Uniform click** — every beat sounds identical; beat 1 is not accented.
 9. **Metronome volume** — With system volume at maximum, the slider under the
    pendulum should make the clicks noticeably louder than the pre-volume POC and
    fully silent at 0. The chosen level should survive a relaunch (persisted).

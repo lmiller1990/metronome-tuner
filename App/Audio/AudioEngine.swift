@@ -237,7 +237,7 @@ public final class AudioEngine {
         metronomeEngine?.setBPM(clamped)
     }
 
-    /// Sets the metronome's own output level (0...1), independent of the system
+    /// Sets the metronome's own output level (0...4), independent of the system
     /// volume, and persists it. Applies live while the metronome is running.
     public func setMetronomeVolume(_ volume: Double) {
         let clamped = Self.clampVolume(volume)
@@ -256,8 +256,8 @@ public final class AudioEngine {
         metronomeEngine?.setSound(sound)
     }
 
-    /// Plays a short preview of `sound` (four accented-then-normal clicks)
-    /// without starting, stopping, or advancing the metronome schedule.
+    /// Plays a short preview of `sound` (four identical clicks) without
+    /// starting, stopping, or advancing the metronome schedule.
     public func previewMetronomeSound(_ sound: MetronomeSound) {
         metronomeEngine?.preview(sound, beats: 4)
     }
@@ -306,8 +306,7 @@ public final class AudioEngine {
 
         let metronome = MetronomeEngine(sampleRate: sampleRate,
                                         clickBox: clickBox,
-                                        beatsPerMeasure: metronome.beatsPerMeasure,
-                                        accentFirstBeat: metronome.accentFirstBeat)
+                                        beatsPerMeasure: metronome.beatsPerMeasure)
         metronomeEngine = metronome
         metronome.setVolume(self.metronome.volume)
         metronome.setSound(self.metronome.sound)
