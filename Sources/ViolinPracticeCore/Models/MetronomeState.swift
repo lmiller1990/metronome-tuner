@@ -1,24 +1,14 @@
 /// The click timbre selectable in Settings.
 public enum MetronomeSound: String, CaseIterable, Identifiable, Sendable {
-    case classic
-    case woodblock
-    case beep
-    case digital
     case clap1
     case clap2
-    case rimshot
 
     public var id: String { rawValue }
 
     public var displayName: String {
         switch self {
-        case .classic: return "Classic"
-        case .woodblock: return "Woodblock"
-        case .beep: return "Beep"
-        case .digital: return "Digital"
         case .clap1: return "Clap 1"
         case .clap2: return "Clap 2"
-        case .rimshot: return "Rimshot"
         }
     }
 }
@@ -43,8 +33,8 @@ public struct MetronomeState: Equatable, Sendable {
     /// limiting in the render block. Defaults to 1.
     public var volume: Double = 1
 
-    /// Which click timbre the metronome plays. Defaults to `.classic`.
-    public var sound: MetronomeSound = .classic
+    /// Which click timbre the metronome plays. Defaults to `.clap1`.
+    public var sound: MetronomeSound = .clap1
 
     public init() {}
 

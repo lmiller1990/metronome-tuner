@@ -21,7 +21,7 @@ struct PracticeView: View {
                 topBar
                 referenceLabel
                 tuner
-                    .frame(height: max(200, geo.size.height * 0.44))
+                    .frame(height: max(200, geo.size.height * 0.50))
                 metronome
                     .frame(maxHeight: .infinity)
             }
@@ -32,8 +32,10 @@ struct PracticeView: View {
             TuningSettingsView(
                 referenceA4Hz: engine.referenceA4Hz,
                 sound: engine.metronome.sound,
+                volume: engine.metronome.volume,
                 onSelectReference: { engine.setReferenceA4Hz($0) },
                 onSelectSound: { engine.setMetronomeSound($0) },
+                onSelectVolume: { engine.setMetronomeVolume($0) },
                 onPreviewSound: { engine.previewMetronomeSound($0) }
             )
         }
@@ -103,7 +105,7 @@ struct PracticeView: View {
 
             ZStack {
                 PendulumView(phase: engine.pendulumPhase)
-                    .frame(maxWidth: 240, maxHeight: .infinity)
+                    .frame(maxWidth: 360, maxHeight: .infinity)
                 HStack {
                     Text("\(engine.metronome.beatsPerMeasure)/4")
                         .font(.system(size: 14, weight: .semibold, design: .rounded))
@@ -114,42 +116,10 @@ struct PracticeView: View {
             .frame(maxHeight: .infinity)
             .padding(.horizontal, 24)
 
-            volumeRow
             startStopButton
         }
         .padding(.horizontal, 20)
         .padding(.bottom, 12)
-    }
-
-    /// Independent metronome level, separate from the system volume. The icon
-    /// mirrors the current level so the state is readable without the slider.
-    private var volumeRow: some View {
-        HStack(spacing: 12) {
-            Image(systemName: volumeSymbol)
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(Color.white.opacity(0.5))
-                .frame(width: 22)
-                .accessibilityHidden(true)
-            Slider(value: volumeBinding, in: MetronomeState.volumeRange)
-                .tint(Color.green)
-                .accessibilityLabel("Metronome volume")
-                .accessibilityValue("\(Int((engine.metronome.volume * 100).rounded())) percent")
-        }
-    }
-
-    private var volumeBinding: Binding<Double> {
-        Binding(
-            get: { engine.metronome.volume },
-            set: { engine.setMetronomeVolume($0) }
-        )
-    }
-
-    private var volumeSymbol: String {
-        switch engine.metronome.volume {
-        case ..<0.01: return "speaker.slash.fill"
-        case ..<0.5: return "speaker.wave.1.fill"
-        default: return "speaker.wave.2.fill"
-        }
     }
 
     private var startStopButton: some View {

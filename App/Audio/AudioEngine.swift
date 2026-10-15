@@ -195,9 +195,9 @@ public final class AudioEngine {
         let storedBPM = UserDefaults.standard.object(forKey: Self.metronomeBPMKey) as? Double
         metronome.bpm = Self.clampBPM(storedBPM ?? metronome.bpm)
 
-        // Restore the persisted click sound (falls back to `.classic`).
+        // Restore the persisted click sound (falls back to Clap 1).
         let storedSound = UserDefaults.standard.string(forKey: Self.metronomeSoundKey) ?? ""
-        metronome.sound = MetronomeSound(rawValue: storedSound) ?? .classic
+        metronome.sound = MetronomeSound(rawValue: storedSound) ?? .clap1
 
         observeAudioLifecycle()
     }

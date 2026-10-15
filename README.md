@@ -15,13 +15,12 @@ Key design goals (see `PLAN.md` and `AGENTS.md` for the full spec):
   sustained note.
 - **Polished single dark screen** — tuner gauge in the upper half, pendulum
   metronome in the lower half.
-- **Independent metronome volume** — a slider under the pendulum sets the click
-  level separately from the system volume (`MetronomeState.volume`, persisted).
-  Clicks are synthesised near full scale; the slider runs 0–4× so values past
+- **Independent metronome volume** — a slider in Settings sets the click level
+  separately from the system volume (`MetronomeState.volume`, persisted).
+  Clicks are pre-rendered near full scale; the slider runs 0–4× so values past
   unity add gain with soft limiting for a genuinely louder, distortion-free click.
-- **Selectable metronome sounds** — Classic, Woodblock, Beep, Digital, Rimshot,
-  and two bundled clap samples (Clap 1 / Clap 2, loaded from `clap1.wav` and
-  `clap2.wav`), each previewable from Settings.
+- **Selectable metronome sounds** — two bundled clap samples (Clap 1 / Clap 2,
+  loaded from `clap1.wav` and `clap2.wav`), each previewable from Settings.
 - **Configurable A4 reference** — tap ⚙ to set the concert pitch (415–466 Hz;
   presets 415/432/440/442/443/444 plus a fine slider/stepper). The tuner's note
   grid, cents, and the "A4 = …" label all follow the chosen reference, which is
@@ -30,6 +29,29 @@ Key design goals (see `PLAN.md` and `AGENTS.md` for the full spec):
 Zero third-party runtime dependencies. Deterministic DSP/model logic lives in a
 Swift Package (`ViolinPracticeCore`) and is unit-tested on macOS; the iOS app
 target imports that package.
+
+## Recent changes
+
+- **Two clap sounds only** — Classic / Woodblock / Beep / Digital / Rimshot were
+  removed; `MetronomeSound` is now just **Clap 1** and **Clap 2**, and
+  `makeTonalClick` / `makeRimshot` were deleted from `MetronomeEngine`. The default
+  and the persisted-sound fallback are now **Clap 1**.
+- **Pendulum-hero UI** — the pendulum arm is larger (wider shaft, bigger bob, wider
+  ±32° swing), the BPM readout and −/+ controls are smaller, and the metronome
+  volume slider moved **into Settings** to reclaim space for the tuner gauge and
+  pendulum.
+- **Louder clicks** — the volume slider now runs **0–4×** with a `tanh` soft-clip,
+  so boosting past unity gets louder without hard digital clipping; the synthesized
+  body was made deeper (lower fundamental + low thump) and longer.
+- **Uniform click** — the downbeat accent was removed; every beat sounds identical.
+- **Real clap samples** — the synthesized clap was replaced with two bundled WAVs
+  (`clap1.wav`, `clap2.wav`), selectable as **Clap 1** / **Clap 2**. The loader
+  resamples the stereo 44.1 kHz files to the engine's mono rate (streaming
+  `AVAudioConverter`), and the render block plays each sample **in full** — click
+  tails now carry across render buffers, fixing a bug where clicks were truncated
+  to ~20 ms (only the attack was audible).
+- **Reproducible signing** — `DEVELOPMENT_TEAM` is set in `project.yml` so
+  `xcodegen generate` yields a signable device build.
 
 ---
 
@@ -104,9 +126,9 @@ signing/team step above (an unsigned binary can compile but cannot install) or t
 device trust prompt. If you change the bundle id, you may need to re-select the
 run destination.
 
-The default `project.yml` uses `CODE_SIGN_STYLE: Automatic` with an empty
-`DEVELOPMENT_TEAM`, so you **must** pick a team in Xcode (the team is per-developer
-and is not committed).
+`project.yml` sets `CODE_SIGN_STYLE: Automatic` with
+`DEVELOPMENT_TEAM: 9HAD7Y59FC` (Lachlan Miller's team). Change the team to your own
+if you fork the project.
 
 ---
 
@@ -147,9 +169,9 @@ metronome + microphone pitch detection**.
    resume, and the metronome restart. Plug in and unplug headphones: output should
    return to the speaker without going silent.
 8. **Uniform click** — every beat sounds identical; beat 1 is not accented.
-9. **Metronome volume** — With system volume at maximum, the slider under the
-   pendulum should make the clicks noticeably louder than the pre-volume POC and
-   fully silent at 0. The chosen level should survive a relaunch (persisted).
+9. **Metronome volume** — With system volume at maximum, the slider in Settings
+   should make the clicks noticeably louder than the pre-volume POC and fully
+   silent at 0. The chosen level should survive a relaunch (persisted).
 
 ---
 
@@ -174,9 +196,8 @@ Handled in code for shipping:
 
 Not code, still to do before submitting:
 
-- Set `DEVELOPMENT_TEAM` in `project.yml` (or in Xcode) — the committed value is
-  empty because the signing team is per-developer. The bundle id is already set
-  (`me.lachlan-miller.ViolinPractice`).
+- The bundle id is already set (`me.lachlan-miller.ViolinPractice`); the signing
+  team is `9HAD7Y59FC` in `project.yml` — change it if you fork.
 - Decide whether the metronome should keep playing in the background. Today it is
   foreground-only (no `UIBackgroundModes`), the simplest reviewable choice for a
   practice tool.

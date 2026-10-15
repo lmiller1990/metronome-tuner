@@ -1,12 +1,14 @@
 import SwiftUI
 import ViolinPracticeCore
 
-/// Dark, restrained sheet for configuring the A4 reference pitch and metronome sound.
+/// Dark, restrained sheet for configuring the A4 reference pitch, metronome sound,
+/// and metronome volume.
 ///
 /// Presentational only: it reports the chosen frequency through `onSelectReference`,
-/// the chosen sound through `onSelectSound`, and previews through `onPreviewSound`;
-/// it never touches audio state directly. Presets cover common concert standards; the
-/// slider and stepper allow fine adjustment across `MusicTheory.referenceA4HzRange`.
+/// the chosen sound through `onSelectSound`, the chosen volume through `onSelectVolume`,
+/// and previews through `onPreviewSound`; it never touches audio state directly.
+/// Presets cover common concert standards; the slider and stepper allow fine
+/// adjustment across `MusicTheory.referenceA4HzRange`.
 struct TuningSettingsView: View {
     /// Common concert A4 standards (Hz). 415 = baroque, 440 = ISO 16, 442/443/444 = sharp orchestral.
     private static let presets: [Double] = [415, 432, 440, 442, 443, 444]
@@ -14,22 +16,28 @@ struct TuningSettingsView: View {
 
     private let onSelectReference: (Double) -> Void
     private let onSelectSound: (MetronomeSound) -> Void
+    private let onSelectVolume: (Double) -> Void
     private let onPreviewSound: (MetronomeSound) -> Void
 
     @Environment(\.dismiss) private var dismiss
     @State private var selectedHz: Double
     @State private var selectedSound: MetronomeSound
+    @State private var selectedVolume: Double
 
     init(referenceA4Hz: Double,
          sound: MetronomeSound,
+         volume: Double,
          onSelectReference: @escaping (Double) -> Void,
          onSelectSound: @escaping (MetronomeSound) -> Void,
+         onSelectVolume: @escaping (Double) -> Void,
          onPreviewSound: @escaping (MetronomeSound) -> Void) {
         self.onSelectReference = onSelectReference
         self.onSelectSound = onSelectSound
+        self.onSelectVolume = onSelectVolume
         self.onPreviewSound = onPreviewSound
         _selectedHz = State(initialValue: referenceA4Hz)
         _selectedSound = State(initialValue: sound)
+        _selectedVolume = State(initialValue: volume)
     }
 
     var body: some View {
@@ -39,6 +47,7 @@ struct TuningSettingsView: View {
                 presetsRow
                 fineControls
                 soundSection
+                volumeSection
                 Spacer(minLength: 0)
             }
             .padding(24)
@@ -54,6 +63,9 @@ struct TuningSettingsView: View {
         .preferredColorScheme(.dark)
         .onChange(of: selectedHz) { _, newValue in
             onSelectReference(newValue)
+        }
+        .onChange(of: selectedVolume) { _, newValue in
+            onSelectVolume(newValue)
         }
     }
 
@@ -182,6 +194,36 @@ struct TuningSettingsView: View {
                 )
             }
             .buttonStyle(.plain)
+        }
+    }
+
+    // MARK: - Metronome volume
+
+    private var volumeSection: some View {
+        VStack(spacing: 10) {
+            Text("METRONOME VOLUME")
+                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                .tracking(1.5)
+                .foregroundStyle(Color.white.opacity(0.4))
+            HStack(spacing: 12) {
+                Image(systemName: volumeSymbol)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Color.white.opacity(0.5))
+                    .frame(width: 22)
+                    .accessibilityHidden(true)
+                Slider(value: $selectedVolume, in: MetronomeState.volumeRange)
+                    .tint(Color.green)
+                    .accessibilityLabel("Metronome volume")
+                    .accessibilityValue("\(Int((selectedVolume * 100).rounded())) percent")
+            }
+        }
+    }
+
+    private var volumeSymbol: String {
+        switch selectedVolume {
+        case ..<0.01: return "speaker.slash.fill"
+        case ..<0.5: return "speaker.wave.1.fill"
+        default: return "speaker.wave.2.fill"
         }
     }
 

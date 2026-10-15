@@ -317,77 +317,14 @@ final class MetronomeEngine: @unchecked Sendable {
 
     // MARK: - Click synthesis (runs once, off the audio thread)
 
-    /// Pre-rendered click buffer per sound. Tonal sounds are synthesised; the two
-    /// claps are loaded from bundled `.wav` samples. Every beat renders the same
-    /// click (no downbeat accent), and each buffer is peak-normalized to 0.98.
+    /// Pre-rendered click buffer per sound. Both claps are loaded from bundled
+    /// `.wav` samples. Every beat renders the same click (no downbeat accent),
+    /// and each buffer is peak-normalized to 0.98.
     private static func makeClick(sampleRate: Double, sound: MetronomeSound) -> [Float] {
         switch sound {
         case .clap1: return loadClap("clap1", sampleRate: sampleRate)
         case .clap2: return loadClap("clap2", sampleRate: sampleRate)
-        case .rimshot: return makeRimshot(sampleRate: sampleRate)
-        case .classic, .woodblock, .beep, .digital:
-            return makeTonalClick(sampleRate: sampleRate, sound: sound)
         }
-    }
-
-    /// Tonal clicks: a deep decaying body tone, a low thump for weight, and a
-    /// broadband noise attack transient. The body decays slowly enough to carry
-    /// real energy (louder perceived level) without bleeding into the next beat
-    /// at the maximum tempo. One uniform synthesis — no downbeat accent.
-    private static func makeTonalClick(sampleRate: Double, sound: MetronomeSound) -> [Float] {
-        var seed: UInt64 = 0x9E3779B97F4A7C15
-        func nextNoise() -> Float {
-            seed = seed &* 6364136223846793005 &+ 1442695040888963407
-            // Logical shift on the UInt64 keeps the sample in [0, 1), so the noise
-            // spans [-1, 1) as intended. An Int64 arithmetic shift would yield
-            // negatives and skew the distribution (and, in the clap/rimshot
-            // `nextUnit`, fed negative sample indices).
-            let v = Float(seed >> 40) / Float(1 << 24)
-            return v * 2 - 1
-        }
-
-        let dur: Double
-        let freq: Double
-        let decay: Double
-        let noiseDur: Double
-        let noiseAmt: Double
-        let harmonic2: Double
-        let thumpFreq: Double
-        let thumpAmp: Double
-
-        switch sound {
-        case .classic:
-            dur = 0.07; freq = 800; decay = 45
-            noiseDur = 0.004; noiseAmt = 0.45; harmonic2 = 0.25
-            thumpFreq = 130; thumpAmp = 1.0
-        case .woodblock:
-            dur = 0.09; freq = 550; decay = 28
-            noiseDur = 0.006; noiseAmt = 0.7; harmonic2 = 0.4
-            thumpFreq = 110; thumpAmp = 1.0
-        case .beep:
-            dur = 0.16; freq = 650; decay = 10
-            noiseDur = 0.003; noiseAmt = 0.08; harmonic2 = 0.0
-            thumpFreq = 150; thumpAmp = 0.35
-        case .digital:
-            dur = 0.045; freq = 1100; decay = 100
-            noiseDur = 0.002; noiseAmt = 0.5; harmonic2 = 0.0
-            thumpFreq = 180; thumpAmp = 0.8
-        case .clap1, .clap2, .rimshot:
-            fatalError("makeTonalClick does not support \(sound)")
-        }
-
-        let n = max(1, Int(sampleRate * dur))
-        let thumpDecay = dur * 0.6
-        var s = [Float](repeating: 0, count: n)
-        for i in 0..<n {
-            let t = Double(i) / sampleRate
-            let body = sin(2 * .pi * freq * t) + harmonic2 * sin(4 * .pi * freq * t)
-            let env = exp(-decay * t)
-            let noiseEnv = exp(-t / noiseDur) * noiseAmt
-            let thump = thumpAmp * sin(2 * .pi * thumpFreq * t) * exp(-t / thumpDecay)
-            s[i] = Float(body * env + thump + Double(nextNoise()) * noiseEnv)
-        }
-        return normalizePeak(s, to: 0.98)
     }
 
     /// Loads a bundled `.wav` clap, converts it to mono Float32 at the engine's
@@ -436,45 +373,6 @@ final class MetronomeEngine: @unchecked Sendable {
         let frames = Int(dstBuffer.frameLength)
         guard frames > 0, let channel = dstBuffer.floatChannelData?[0] else { return silent() }
         return normalizePeak(Array(UnsafeBufferPointer(start: channel, count: frames)), to: 0.98)
-    }
-
-    /// Rimshot: a sharp "stick" click (very short bright noise) plus a
-    /// fast-decaying high metallic ring.
-    private static func makeRimshot(sampleRate: Double) -> [Float] {
-        var seed: UInt64 = 0x9E3779B97F4A7C15
-        func nextUnit() -> Float {
-            seed = seed &* 6364136223846793005 &+ 1442695040888963407
-            // Logical shift on the UInt64 keeps the result in [0, 1). Shifting an
-            // Int64 (arithmetic shift) would yield negatives here, which fed
-            // negative sample indices into the transient loop (index-out-of-range).
-            return Float(seed >> 40) / Float(1 << 24)
-        }
-        func nextNoise() -> Float {
-            nextUnit() * 2 - 1
-        }
-
-        let dur = 0.055
-        let n = max(1, Int(sampleRate * dur))
-        var s = [Float](repeating: 0, count: n)
-
-        let ringFreq = 4400.0
-        let ring2 = ringFreq * 1.5
-        let ringAmp = 0.8
-        let ringDecay = 0.011
-
-        var prev: Float = 0
-        for i in 0..<n {
-            let t = Double(i) / sampleRate
-            let w = nextNoise()
-            let bright = w - prev
-            prev = w
-            let stick = bright * Float(exp(-t / 0.0025)) * 1.0
-            let ring = sin(2 * .pi * ringFreq * t) + 0.35 * sin(2 * .pi * ring2 * t)
-            let ringEnv = Float(exp(-t / ringDecay)) * Float(ringAmp)
-            s[i] = stick + Float(ring) * ringEnv
-        }
-
-        return normalizePeak(s, to: 0.98)
     }
 
     private static func normalizePeak(_ samples: [Float], to target: Float) -> [Float] {

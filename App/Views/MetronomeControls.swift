@@ -11,18 +11,18 @@ struct MetronomeControls: View {
     let onIncrement: () -> Void
 
     var body: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 4) {
             Text(MusicTheory.tempoMarking(bpm: bpm))
                 .font(.system(size: 15, weight: .semibold, design: .rounded))
                 .tracking(1.0)
                 .foregroundStyle(Color.white.opacity(0.5))
                 .animation(.easeOut(duration: 0.15), value: displayedBPM)
 
-            HStack(spacing: 28) {
+            HStack(spacing: 20) {
                 StepButton(systemName: "minus", action: onDecrement)
                 VStack(spacing: -2) {
                     Text("\(displayedBPM)")
-                        .font(.system(size: 60, weight: .bold, design: .rounded))
+                        .font(.system(size: 40, weight: .bold, design: .rounded))
                         .monospacedDigit()
                         .foregroundStyle(.white)
                         .contentTransition(.numericText())
@@ -32,7 +32,7 @@ struct MetronomeControls: View {
                         .tracking(2)
                         .foregroundStyle(Color.white.opacity(0.4))
                 }
-                .frame(minWidth: 116)
+                .frame(minWidth: 90)
                 StepButton(systemName: "plus", action: onIncrement)
             }
         }
@@ -51,9 +51,9 @@ private struct StepButton: View {
 
     var body: some View {
         Image(systemName: systemName)
-            .font(.system(size: 22, weight: .semibold))
+            .font(.system(size: 18, weight: .semibold))
             .foregroundStyle(.white)
-            .frame(width: 54, height: 54)
+            .frame(width: 44, height: 44)
             .background(Circle().fill(Color.white.opacity(0.08)))
             .overlay(Circle().stroke(Color.white.opacity(0.12), lineWidth: 1))
             .contentShape(Circle())

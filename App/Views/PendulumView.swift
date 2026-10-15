@@ -6,7 +6,7 @@ import Foundation
 /// Kept separate (and free of any state or animation) so the phase → angle mapping
 /// is a pure, testable function of its input.
 enum PendulumGeometry {
-    static let maxAngleDegrees = 28.0
+    static let maxAngleDegrees = 32.0
 
     /// `phase` is 0…1 progress through the current beat, from `AudioEngine.pendulumPhase`.
     /// The arm performs one full, continuous left→right→left swing per beat: it is at an
@@ -45,18 +45,18 @@ struct PendulumView: View {
             VStack(spacing: 0) {
                 Capsule()
                     .fill(Color.white.opacity(0.85))
-                    .frame(width: 3, height: max(20, length - 22))
+                    .frame(width: 4, height: max(24, length - 26))
                 Circle()
                     .fill(Color.green)
-                    .frame(width: 16, height: 16)
-                    .shadow(color: Color.green.opacity(0.4), radius: 6)
+                    .frame(width: 20, height: 20)
+                    .shadow(color: Color.green.opacity(0.4), radius: 7)
             }
-            .frame(width: 20, height: length, alignment: .top)
+            .frame(width: 24, height: length, alignment: .top)
             .rotationEffect(.degrees(angle), anchor: .top)
 
             Circle()
                 .fill(Color.white.opacity(0.7))
-                .frame(width: 10, height: 10)
+                .frame(width: 12, height: 12)
         }
     }
 
@@ -73,7 +73,7 @@ struct PendulumView: View {
                 let isCentre = abs(value) < 0.1
                 Capsule()
                     .fill(Color.white.opacity(isCentre ? 0.30 : 0.16))
-                    .frame(width: 1.5, height: isCentre ? 10 : 6)
+                    .frame(width: 2, height: isCentre ? 12 : 8)
                     .frame(width: 2, height: radius, alignment: .bottom)
                     .rotationEffect(.degrees(value), anchor: .top)
             }
