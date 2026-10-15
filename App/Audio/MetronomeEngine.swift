@@ -42,9 +42,18 @@ final class MetronomeEngine: @unchecked Sendable {
         var soundIndex = 0
     }
 
+    /// A click whose tail extends past the current render buffer. Render-thread
+    /// only (no lock); `position` is the number of samples already written.
+    private struct ActiveClick {
+        var soundIndex = 0
+        var position = 0
+        var active = false
+    }
+
     private let lock = UnfairLock()
     private var schedule = Schedule()
     private var pendingBeats: [RenderBeat] = (0..<16).map { _ in RenderBeat() }
+    private var activeClicks: [ActiveClick] = (0..<8).map { _ in ActiveClick() }
 
     private let sampleRate: Double
     /// Pre-rendered click buffers, indexed by `Schedule.soundIndex` /
@@ -216,24 +225,54 @@ final class MetronomeEngine: @unchecked Sendable {
         }
 
         // 2. Mix clicks into the output (outside the lock) and register each
-        //    click's host time with the shared ClickRejection.
+        //    click's host time with the shared ClickRejection. Clicks longer than
+        //    one render buffer carry their remainder into `activeClicks` and are
+        //    finished on subsequent renders, so a 0.4 s sample plays in full.
         fillSilence(audioBufferList, frameCount: frames)
-        if beatCount > 0 {
-            let gain = Float(volume)
-            for i in 0..<beatCount {
-                let beat = pendingBeats[i]
-                clickBox.register(atSeconds: beat.hostSeconds)
-                guard gain > 0 else { continue }
-                mix(click: clicksBySound[beat.soundIndex],
-                    gain: gain,
-                    at: beat.offset,
-                    into: audioBufferList,
-                    frameCount: frames)
+        let gain = Float(volume)
+        var producedAudio = false
+
+        // New clicks starting in this buffer.
+        for i in 0..<beatCount {
+            let beat = pendingBeats[i]
+            clickBox.register(atSeconds: beat.hostSeconds)
+            guard gain > 0 else { continue }
+            let click = clicksBySound[beat.soundIndex]
+            let consumed = mixClick(click,
+                                    gain: gain,
+                                    clickStart: 0,
+                                    outStart: max(0, Int(beat.offset.rounded(.down))),
+                                    into: audioBufferList,
+                                    frameCount: frames)
+            if consumed > 0 { producedAudio = true }
+            if consumed < click.count {
+                if let slot = activeClicks.firstIndex(where: { !$0.active }) {
+                    activeClicks[slot] = ActiveClick(soundIndex: beat.soundIndex,
+                                                     position: consumed,
+                                                     active: true)
+                }
             }
-            isSilence.pointee = ObjCBool(volume <= 0)
-        } else {
-            isSilence.pointee = true
         }
+
+        // Continue tails started in previous buffers.
+        if gain > 0 {
+            for i in activeClicks.indices where activeClicks[i].active {
+                let click = clicksBySound[activeClicks[i].soundIndex]
+                let consumed = mixClick(click,
+                                        gain: gain,
+                                        clickStart: activeClicks[i].position,
+                                        outStart: 0,
+                                        into: audioBufferList,
+                                        frameCount: frames)
+                if consumed > 0 { producedAudio = true }
+                activeClicks[i].position += consumed
+                if activeClicks[i].position >= click.count {
+                    activeClicks[i].active = false
+                }
+            }
+        }
+
+        isSilence.pointee = ObjCBool(!producedAudio)
         return noErr
     }
 
@@ -247,29 +286,33 @@ final class MetronomeEngine: @unchecked Sendable {
         }
     }
 
-    private func mix(click: [Float],
-                     gain: Float,
-                     at offset: Double,
-                     into audioBufferList: UnsafeMutablePointer<AudioBufferList>,
-                     frameCount: Int) {
-        let start = Int(offset.rounded(.down))
-        guard start < frameCount else { return }
-        // Gains above unity soft-clip so boosted clicks get louder (more RMS)
-        // without wrapping into harsh digital clipping. `tanhf` is a libm call:
-        // allocation-free and lock-free, safe on the render thread.
+    /// Mixes `click[clickStart...]` into the output from `outStart`, writing at
+    /// most the samples that fit in this buffer. Returns the number of click
+    /// samples consumed. Gains above unity soft-clip (`tanhf` is allocation- and
+    /// lock-free, safe on the render thread).
+    private func mixClick(_ click: [Float],
+                          gain: Float,
+                          clickStart: Int,
+                          outStart: Int,
+                          into audioBufferList: UnsafeMutablePointer<AudioBufferList>,
+                          frameCount: Int) -> Int {
+        guard outStart < frameCount, clickStart < click.count else { return 0 }
         let softClip = gain > 1.0
+        let n = min(click.count - clickStart, frameCount - outStart)
+        guard n > 0 else { return 0 }
         for buffer in UnsafeMutableAudioBufferListPointer(audioBufferList) {
             guard let data = buffer.mData else { continue }
             let maxFrames = Int(buffer.mDataByteSize) / MemoryLayout<Float>.size
-            let n = min(click.count, min(frameCount, maxFrames) - start)
-            guard n > 0 else { continue }
+            guard outStart < maxFrames else { continue }
+            let count = min(n, maxFrames - outStart)
             let floats = data.assumingMemoryBound(to: Float.self)
-            for i in 0..<n {
-                var sample = click[i] * gain
+            for i in 0..<count {
+                var sample = click[clickStart + i] * gain
                 if softClip { sample = tanhf(sample) }
-                floats[start + i] += sample
+                floats[outStart + i] += sample
             }
         }
+        return n
     }
 
     // MARK: - Click synthesis (runs once, off the audio thread)
