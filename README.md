@@ -140,7 +140,7 @@ metronome + microphone pitch detection**.
 
 1. **Setup** — Install the app on an iPhone, grant microphone permission, and place
    the phone near your instrument. The tuner should show an idle state
-   (`—` / `Listening…`) until a confident pitch is heard.
+   (`—`) until a confident pitch is heard.
 2. **Note recognition (the core experiment)** — Play a **sustained** note near the
    phone while the metronome is stopped, and while it is running (press **Start** so
    clicks are audible through the speaker):
@@ -154,7 +154,7 @@ metronome + microphone pitch detection**.
    pitch.
 3. **Needle stability** — On a sustained note the needle should be visually stable,
    not flickering; brief signal dropouts should hold the last reading for a moment
-   before returning to `Listening…`.
+   before returning to the idle `—` state.
 4. **Click-rejection effectiveness** — With the metronome running and clicking
    through the speaker, a sustained violin note must **not** change note or jump
    noticeably on each click. This is the key acceptance test for the rejection
