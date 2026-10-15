@@ -346,8 +346,10 @@ final class MetronomeEngine: @unchecked Sendable {
         return normalizePeak(s, to: 0.98)
     }
 
-    /// Hand clap: several short bright-noise "finger" transients clustered in the
-    /// first ~20 ms, plus a damped "room" tail.
+    /// Hand clap: a damped "hand cavity" body resonance plus a cluster of
+    /// low-passed noise "finger" transients and a short room tail. The noise is
+    /// one-pole low-passed — never the raw first-difference (`w - prev`), which is
+    /// a high-pass and is what produced the hissy/whiny "not nice" timbre.
     private static func makeClap(sampleRate: Double) -> [Float] {
         var seed: UInt64 = 0x9E3779B97F4A7C15
         func nextUnit() -> Float {
@@ -361,35 +363,40 @@ final class MetronomeEngine: @unchecked Sendable {
             nextUnit() * 2 - 1
         }
 
-        let dur = 0.13
+        let dur = 0.12
         let n = max(1, Int(sampleRate * dur))
         var s = [Float](repeating: 0, count: n)
 
-        let transientCount = 6
-        for _ in 0..<transientCount {
-            let start = 0.004 + Double(nextUnit()) * 0.014
-            let amp = 0.55 + nextUnit() * 0.45
-            let burstLen = Int(sampleRate * (0.004 + Double(nextUnit()) * 0.006))
-            var prev: Float = 0
+        // 1. Body resonance: the short "thump" of the palm cavity (~300 Hz).
+        let bodyFreq = 300.0
+        let bodyDecay = 0.03
+        for i in 0..<n {
+            let t = Double(i) / sampleRate
+            s[i] += Float(sin(2 * .pi * bodyFreq * t) * exp(-t / bodyDecay)) * 0.7
+        }
+
+        // 2. Finger transients: several staggered, low-passed noise pops.
+        let popCount = 9
+        for _ in 0..<popCount {
+            let start = 0.002 + Double(nextUnit()) * 0.022
+            let amp = 0.45 + nextUnit() * 0.55
+            let burstLen = Int(sampleRate * (0.003 + Double(nextUnit()) * 0.005))
+            var lp: Float = 0
             for j in 0..<burstLen {
                 let idx = Int(start * sampleRate) + j
                 if idx >= n { break }
                 let t = Double(j) / sampleRate
-                let w = nextNoise()
-                let bright = w - prev
-                prev = w
-                s[idx] += bright * Float(exp(-t / 0.004)) * amp
+                lp += (nextNoise() - lp) * 0.22          // one-pole low-pass
+                s[idx] += lp * Float(exp(-t / 0.003)) * amp
             }
         }
 
-        var prev: Float = 0
-        let tailDecay = 0.032
+        // 3. Room tail: very low-passed, low-amplitude noise.
+        var tailLP: Float = 0
         for i in 0..<n {
             let t = Double(i) / sampleRate
-            let w = nextNoise()
-            let bright = w - prev
-            prev = w
-            s[i] += bright * Float(exp(-t / tailDecay)) * 0.30
+            tailLP += (nextNoise() - tailLP) * 0.04
+            s[i] += tailLP * Float(exp(-t / 0.04)) * 0.25
         }
 
         return normalizePeak(s, to: 0.98)
