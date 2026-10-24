@@ -205,6 +205,56 @@ Not code, still to do before submitting:
 
 ---
 
+## Release Plan
+
+Working tree → App Store checklist. Each item is tagged with who can do it:
+
+- **🤖** — scriptable here (deterministic command or file edit; no credentials).
+- **🤝** — LLM drafts/assists, human approves or supplies credentials/hosting.
+- **👤** — human only (Apple ID, legal/business decision, real hardware).
+
+### 1. Code & build — verify first (🤖)
+
+- [ ] `swift test` green (63 tests).
+- [ ] `xcodegen generate` clean.
+- [ ] `xcodebuild -project ViolinPractice.xcodeproj -scheme ViolinPractice -destination 'generic/platform=iOS' build` compiles.
+- [x] App icon has **no alpha channel** — fixed (`sips -g hasAlpha` → `no`). App Review rejects icons with an alpha channel.
+
+### 2. Assets — 🤖 prep, 👤 approval
+
+- [ ] 👤 **Final app icon** — `App/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png` is placeholder artwork; drop in final 1024×1024 art (no alpha, no rounded corners). The LLM can re-strip alpha / resize after you supply it.
+- [ ] 🤖 **Screenshots** — capture with `xcrun simctl io booted screenshot <file>.png` on the downloaded simulator runtime; 6.9″ and 6.5″ iPhone sizes are required (verify the current required list in App Store Connect — it changes with new devices). **Caveat:** the mic/audio pipeline cannot run in the simulator, so the tuner region will show its idle `—` / "Listening…" state; a live-note reading needs a physical iPhone shot.
+- [ ] 👤 Select and upload the final screenshot set (accuracy check: BPM value, note shown).
+
+### 3. App Store Connect metadata — 🤝 draft, 👤 submit
+
+- [ ] 🤝 **Name / subtitle** — **Pitch & Pulse** (Name) / **Tuner & Metronome** (Subtitle). The full string "Pitch & Pulse — Tuner & Metronome" is 33 chars, over the 30-char App Store name limit, so it must split across Name + Subtitle. Description / keywords — LLM drafts, you paste.
+- [ ] 👤 Category **Music** + subcategory.
+- [ ] 👤 **Support URL** — `https://lachlan-miller.me/metronome` (page written in `blog/templates/metronome.html`, routed via `/metronome`; deploy the blog to serve it).
+- [ ] 👤 **Contact email** — `metronome@lachlan-miller.me` (App Review contact + support fallback).
+- [ ] 👤 **Privacy policy URL** — optional when "Data Not Collected", but host one anyway; LLM can draft the policy text.
+- [ ] 🤝 **App Privacy** = "Data Not Collected" (no analytics/crash SDKs — zero third-party deps, so this is accurate).
+- [ ] 🤝 **Age rating** questionnaire — LLM advises the answers (mic/audio → typically 4+).
+- [ ] 👤 **Pricing & availability** — business decision.
+- [ ] 🤝 **Export compliance** — confirm the toggle matches `ITSAppUsesNonExemptEncryption=false` already in `Info.plist`.
+
+### 4. Build, TestFlight, submission — 🤝 commands, 👤 auth
+
+- [ ] 🤝 Archive Release + upload to App Store Connect — LLM generates the `xcodebuild archive` / `-exportArchive` commands; you supply the App Store Connect API key or Apple ID login.
+- [ ] 👤 Distribute a **TestFlight** beta to internal testers.
+- [ ] 👤 Submit for App Review — final click, requires your credentials.
+
+### 5. Hardware validation — 👤 (cannot be automated)
+
+Run the full **Hardware acceptance checklist (§8)** on a real iPhone with a real instrument. The simulator cannot exercise the audio pipeline. This is the release gate the app's claim rests on — especially **click rejection** (metronome audible through the speaker while detecting pitch) and **BPM change mid-run**.
+
+### What an LLM can and cannot do here
+
+- **Can:** run tests/build/archive; edit plist/privacy manifest; process/validate the icon; draft every metadata field; boot the simulator and capture screenshots; verify signability and manifest completeness.
+- **Cannot:** authenticate to your Apple ID or App Store Connect; pay the $99 developer fee; host the support/privacy URLs; exercise the audio pipeline (needs real hardware); or make the final legal, business, and App Review decisions.
+
+---
+
 ## Verification without hardware
 
 The following pass in this environment (macOS, no iOS simulator runtime installed):
