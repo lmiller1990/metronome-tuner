@@ -71,6 +71,7 @@ App/                          the iOS app target
                               MetronomeControls, PendulumView, TuningSettingsView)
 project.yml                   XcodeGen spec
 Package.swift                 SPM manifest for the core library + tests
+Screenshots/                  App Store screenshots (s1–s3.png, 1206×2622, no alpha)
 ```
 
 ---
@@ -137,6 +138,8 @@ if you fork the project.
 These steps require a real iPhone with a microphone and speaker (a simulator cannot
 exercise the audio pipeline). The central experiment is **simultaneous speaker
 metronome + microphone pitch detection**.
+
+✅ **Validated on hardware 2026-10-24** — reported working end-to-end.
 
 1. **Setup** — Install the app on an iPhone, grant microphone permission, and place
    the phone near your instrument. The tuner should show an idle state
@@ -215,22 +218,22 @@ Working tree → App Store checklist. Each item is tagged with who can do it:
 
 ### 1. Code & build — verify first (🤖)
 
-- [ ] `swift test` green (63 tests).
-- [ ] `xcodegen generate` clean.
-- [ ] `xcodebuild -project ViolinPractice.xcodeproj -scheme ViolinPractice -destination 'generic/platform=iOS' build` compiles.
+- [x] `swift test` green (63 tests, 0 failures — re-verified 2026-10-24).
+- [x] `xcodegen generate` clean (re-verified 2026-10-24).
+- [x] `xcodebuild -project ViolinPractice.xcodeproj -scheme ViolinPractice -destination 'generic/platform=iOS' build` compiles (re-verified 2026-10-24; also code-signed with the `9HAD7Y59FC` team).
 - [x] App icon has **no alpha channel** — fixed (`sips -g hasAlpha` → `no`). App Review rejects icons with an alpha channel.
 
 ### 2. Assets — 🤖 prep, 👤 approval
 
 - [ ] 👤 **Final app icon** — `App/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png` is placeholder artwork; drop in final 1024×1024 art (no alpha, no rounded corners). The LLM can re-strip alpha / resize after you supply it.
-- [ ] 🤖 **Screenshots** — capture with `xcrun simctl io booted screenshot <file>.png` on the downloaded simulator runtime; 6.9″ and 6.5″ iPhone sizes are required (verify the current required list in App Store Connect — it changes with new devices). **Caveat:** the mic/audio pipeline cannot run in the simulator, so the tuner region will show its idle `—` / "Listening…" state; a live-note reading needs a physical iPhone shot.
+- [x] 🤖 **Screenshots captured** — `Screenshots/s1–s3.png` at **1206 × 2622 px**, which is the **iPhone with Dynamic Island (medium display)** size — the single required iPhone screenshot size (App Store Connect scales these down for smaller devices). Alpha channels stripped (`sips -g hasAlpha` → `no`; App Store rejects alpha/transparency). The tuner region only shows a live note reading on a physical iPhone, so confirm each shot's note/BPM looks intentional before uploading.
 - [ ] 👤 Select and upload the final screenshot set (accuracy check: BPM value, note shown).
 
 ### 3. App Store Connect metadata — 🤝 draft, 👤 submit
 
 - [ ] 🤝 **Name / subtitle** — **Pitch & Pulse** (Name) / **Tuner & Metronome** (Subtitle). The full string "Pitch & Pulse — Tuner & Metronome" is 33 chars, over the 30-char App Store name limit, so it must split across Name + Subtitle. Description / keywords — LLM drafts, you paste.
 - [ ] 👤 Category **Music** + subcategory.
-- [ ] 👤 **Support URL** — `https://lachlan-miller.me/metronome` (page written in `blog/templates/metronome.html`, routed via `/metronome`; deploy the blog to serve it).
+- [x] 👤 **Support URL** — `https://lachlan-miller.me/metronome` is live (verified reachable; covers support contact, getting-started, and on-device privacy). Enter it in the App Store Connect **Support URL** field when submitting.
 - [ ] 👤 **Contact email** — `metronome@lachlan-miller.me` (App Review contact + support fallback).
 - [ ] 👤 **Privacy policy URL** — optional when "Data Not Collected", but host one anyway; LLM can draft the policy text.
 - [ ] 🤝 **App Privacy** = "Data Not Collected" (no analytics/crash SDKs — zero third-party deps, so this is accurate).
@@ -240,13 +243,69 @@ Working tree → App Store checklist. Each item is tagged with who can do it:
 
 ### 4. Build, TestFlight, submission — 🤝 commands, 👤 auth
 
-- [ ] 🤝 Archive Release + upload to App Store Connect — LLM generates the `xcodebuild archive` / `-exportArchive` commands; you supply the App Store Connect API key or Apple ID login.
+Archive, export, and upload (run from the repo root; supply credentials at upload time):
+
+```bash
+# 1. Archive (Release build → .xcarchive)
+xcodebuild -project ViolinPractice.xcodeproj \
+  -scheme ViolinPractice \
+  -destination 'generic/platform=iOS' \
+  -archivePath build/ViolinPractice.xcarchive \
+  archive
+
+# 2. Export an App Store IPA (needs ExportOptions.plist — below)
+xcodebuild -exportArchive \
+  -archivePath build/ViolinPractice.xcarchive \
+  -exportPath build/export \
+  -exportOptionsPlist ExportOptions.plist \
+  -allowProvisioningUpdates
+
+# 3a. Upload — App Store Connect API key (recommended)
+xcrun altool --upload-app \
+  -f build/export/ViolinPractice.ipa \
+  -t ios \
+  --apiKey <KEY_ID> --apiIssuer <ISSUER_ID>
+
+# 3b. Upload — Apple ID + app-specific password (alternative)
+xcrun altool --upload-app \
+  -f build/export/ViolinPractice.ipa \
+  -t ios \
+  -u <APPLE_ID> -p <APP_SPECIFIC_PASSWORD>
+```
+
+`ExportOptions.plist` (place in repo root; team `9HAD7Y59FC`, bundle `me.lachlan-miller.ViolinPractice`):
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>method</key>
+    <string>app-store-connect</string>
+    <key>teamID</key>
+    <string>9HAD7Y59FC</string>
+    <key>signingStyle</key>
+    <string>automatic</string>
+    <key>stripSwiftSymbols</key>
+    <true/>
+    <key>uploadSymbols</key>
+    <true/>
+</dict>
+</plist>
+```
+
+**Distribution prerequisite** — export with `method: app-store-connect` needs an **Apple Distribution** certificate + an **App Store** provisioning profile (paid Apple Developer Program). The archive step succeeds with only a Development identity, but export fails with `No profiles for '…' were found` / `No provider associated with App Store Connect user` until a distribution cert exists. `-allowProvisioningUpdates` lets Xcode create the profile on demand *only if* it's signed in to the right account; otherwise create the cert/profile in Xcode → Signing & Capabilities first.
+
+`altool` is deprecated but still functional; the **Transporter** app (or `xcrun notarytool` for Mac apps) is the GUI alternative if `altool` is retired in a future Xcode.
+
 - [ ] 👤 Distribute a **TestFlight** beta to internal testers.
 - [ ] 👤 Submit for App Review — final click, requires your credentials.
 
 ### 5. Hardware validation — 👤 (cannot be automated)
 
 Run the full **Hardware acceptance checklist (§8)** on a real iPhone with a real instrument. The simulator cannot exercise the audio pipeline. This is the release gate the app's claim rests on — especially **click rejection** (metronome audible through the speaker while detecting pitch) and **BPM change mid-run**.
+
+- [x] **Done 2026-10-24** — user ran the checklist on hardware and reported it working.
 
 ### What an LLM can and cannot do here
 
